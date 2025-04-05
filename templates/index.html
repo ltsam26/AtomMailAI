@@ -1,74 +1,154 @@
 <!DOCTYPE html>
-<html>
+<html data-theme="light">
 <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Atom Mail AI</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; display: flex; }
-        .sidebar { width: 30%; padding: 20px; background: #f9f9f9; border-right: 1px solid #ddd; }
-        .main { width: 70%; padding: 20px; }
-        textarea { width: 100%; height: 120px; border: 1px solid #ccc; border-radius: 4px; padding: 10px; }
-        .history .email { border-bottom: 1px solid #eee; padding: 10px; white-space: pre-wrap; font-size: 14px; }
-        #suggestion { color: #666; margin: 10px 0; font-style: italic; }
-        #loading { display: none; color: #007bff; font-style: italic; }
-        button { padding: 8px 16px; margin-right: 10px; background: #007bff; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
-        button:hover { background: #0056b3; }
-        select, input { padding: 8px; margin: 5px 0; border: 1px solid #ccc; border-radius: 4px; }
-    </style>
+    <!-- Fonts & Icons -->
+    <link href="https://fonts.googleapis.com/css2?family=Roboto&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" />
+    <!-- Styles -->
+    <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
-    <div class="sidebar">
-        <h2>Inbox (History)</h2>
-        <div class="history">
-            {% if history %}
-                {% for email in history %}
-                    <div class="email">{{ email | safe }}</div>
-                {% endfor %}
-            {% else %}
-                <p>No emails yet.</p>
-            {% endif %}
-        </div>
-    </div>
-    <div class="main">
+    <!-- Topbar -->
+    <div class="topbar">
         <h1>Atom Mail AI</h1>
-        <form method="post">
-            <textarea name="input_text" id="input-text" placeholder="Type your prompt or email here..." oninput="getSuggestion()"></textarea>
-            <div id="suggestion"></div>
-            <div id="loading">Generating...</div>
-            <select name="template">
-                <option value="">Select Template</option>
-                {% for key in templates %}
-                    <option value="{{ key }}">{{ key.capitalize() }}</option>
-                {% endfor %}
-            </select>
-            <button type="submit" name="action" value="compose">Compose</button>
-            <button type="submit" name="action" value="reply">Reply</button>
-            <button type="submit" name="action" value="refine" onclick="toggleRefineOptions(true)">Refine</button>
-            <div id="refine-options" style="display: none;">
-                <select name="refine_action">
-                    <option value="shorten">Shorten</option>
-                    <option value="improve">Improve</option>
-                    <option value="formalize">Formalize</option>
-                    <option value="casual">Casual</option>
-                </select>
-            </div>
-            <button type="submit" name="action" value="clear_history">Clear History</button>
-            <h3>Preferences</h3>
-            <label>Tone: <input name="default_tone" value="{{ prefs.default_tone }}"></label>
-            <label>Recipient: <input name="default_recipient" value="{{ prefs.default_recipient }}"></label>
-            <label>Signature: <input name="signature" value="{{ prefs.signature }}"></label>
-            <label>Phrase: <input name="phrase" value="{{ prefs.preferred_phrases[0] }}"></label>
-            <button type="submit" name="action" value="save_prefs">Save Preferences</button>
-            <h3>Feedback</h3>
-            <label>Rating: <input name="rating" type="number" min="1" max="5"></label>
-            <button type="submit" name="action" value="feedback">Submit Feedback</button>
-        </form>
-        <h2>Output</h2>
-        <pre>{{ output }}</pre>
+        <button id="theme-toggle">
+            <span class="material-icons">light_mode</span>
+            <span class="toggle-text">Switch to Dark Theme</span>
+        </button>
     </div>
+
+    <!-- Search Bar -->
+    <div class="search-bar">
+        <span class="material-icons">search</span>
+        <input type="text" placeholder="Search mail" />
+    </div>
+
+    <div class="layout">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <button class="compose-button">
+                <span class="material-icons">edit</span> Compose
+            </button>
+
+            <nav>
+                <ul>
+                    <li class="active"><span class="material-icons">inbox</span> Inbox (History)</li>
+                    <li><span class="material-icons">send</span> Sent</li>
+                    <li><span class="material-icons">drafts</span> Drafts</li>
+                    <li><span class="material-icons">star</span> Starred</li>
+                    <li><span class="material-icons">delete</span> Trash</li>
+                </ul>
+            </nav>
+
+            <!-- History -->
+            <div class="history">
+                <h3>History</h3>
+                {% if history %}
+                    {% for email in history %}
+                        <div class="email">{{ email | safe }}</div>
+                    {% endfor %}
+                {% else %}
+                    <p>No emails yet.</p>
+                {% endif %}
+            </div>
+
+            <!-- Preferences -->
+            <div class="preferences">
+                <h3>Preferences</h3>
+                <form method="POST">
+                    <input type="hidden" name="action" value="save_prefs" />
+                    <label>Default Tone:</label>
+                    <select name="default_tone">
+                        <option value="professional" {% if prefs.default_tone == "professional" %}selected{% endif %}>Professional</option>
+                        <option value="formal" {% if prefs.default_tone == "formal" %}selected{% endif %}>Formal</option>
+                        <option value="casual" {% if prefs.default_tone == "casual" %}selected{% endif %}>Casual</option>
+                        <option value="friendly" {% if prefs.default_tone == "friendly" %}selected{% endif %}>Friendly</option>
+                    </select>
+                    <label>Default Recipient:</label>
+                    <input type="text" name="default_recipient" value="{{ prefs.default_recipient }}" />
+                    <label>Signature:</label>
+                    <input type="text" name="signature" value="{{ prefs.signature }}" />
+                    <label>Phrase:</label>
+                    <input type="text" name="phrase" value="{{ prefs.preferred_phrases[0] }}" />
+                    <input type="submit" value="Save" />
+                </form>
+            </div>
+
+            <!-- Clear History -->
+            <form method="POST" style="margin-top: 10px;">
+                <input type="hidden" name="action" value="clear_history" />
+                <input type="submit" value="Clear History" />
+            </form>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <form method="POST" id="email-form">
+                <textarea name="input_text" id="input-text" placeholder="Type your prompt or email here..." onkeyup="getSuggestion()"></textarea>
+                <div id="suggestion"></div>
+                <div id="loading" style="display: none;">Generating...</div>
+
+                <!-- Action Selection -->
+                <div class="options">
+                    <label><input type="radio" name="action" value="compose" checked onclick="toggleRefineOptions(false)"> Compose</label>
+                    <label><input type="radio" name="action" value="reply" onclick="toggleRefineOptions(false)"> Reply</label>
+                    <label><input type="radio" name="action" value="refine" onclick="toggleRefineOptions(true)"> Refine</label>
+                </div>
+
+                <label>Template:</label>
+                <select name="template">
+                    <option value="">None</option>
+                    {% for key in templates %}
+                        <option value="{{ key }}">{{ key|capitalize }}</option>
+                    {% endfor %}
+                </select>
+
+                <!-- Refinement Options -->
+                <div class="refine-options" id="refine-options" style="display:none;">
+                    <label>Refinement:</label>
+                    <select name="refine_action">
+                        <option value="shorten">Shorten</option>
+                        <option value="improve">Improve</option>
+                        <option value="formalize">Formalize</option>
+                        <option value="casual">Casual</option>
+                        <option value="professional">Professional</option>
+                        <option value="friendly">Friendly</option>
+                    </select>
+                </div>
+
+                <input type="submit" value="Submit" />
+            </form>
+
+            <!-- Output Section -->
+            <section class="output-section">
+                <h2>Generated Email</h2>
+                <pre id="output">{{ output }}</pre>
+
+                <form method="POST" class="feedback-form">
+                    <input type="hidden" name="action" value="feedback" />
+                    <label>Rate:</label>
+                    <select name="rating">
+                        <option value="1">1 (Poor)</option>
+                        <option value="2">2</option>
+                        <option value="3">3</option>
+                        <option value="4">4</option>
+                        <option value="5">5 (Great)</option>
+                    </select>
+                    <input type="submit" value="Submit Feedback" />
+                </form>
+            </section>
+        </main>
+    </div>
+
+    <!-- Script -->
     <script>
         function toggleRefineOptions(show) {
             document.getElementById("refine-options").style.display = show ? "block" : "none";
         }
+
         let debounceTimeout;
         function getSuggestion() {
             document.getElementById("loading").style.display = "block";
@@ -99,6 +179,25 @@
                 }
             }, 1500);
         }
+
+        // Theme toggle functionality
+        const toggleButton = document.getElementById("theme-toggle");
+        const icon = toggleButton.querySelector(".material-icons");
+        const text = toggleButton.querySelector(".toggle-text");
+
+        toggleButton.addEventListener("click", () => {
+            const html = document.documentElement;
+            const currentTheme = html.getAttribute("data-theme");
+            if (currentTheme === "dark") {
+                html.setAttribute("data-theme", "light");
+                icon.textContent = "light_mode";
+                text.textContent = "Switch to Dark Theme";
+            } else {
+                html.setAttribute("data-theme", "dark");
+                icon.textContent = "dark_mode";
+                text.textContent = "Switch to Light Theme";
+            }
+        });
     </script>
 </body>
 </html>
