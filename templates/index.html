@@ -4,10 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Atom Mail AI</title>
-    <!-- Fonts & Icons -->
     <link href="https://fonts.googleapis.com/css2?family=Roboto&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" />
-    <!-- Styles -->
     <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
@@ -23,7 +21,7 @@
     <!-- Search Bar -->
     <div class="search-bar">
         <span class="material-icons">search</span>
-        <input type="text" placeholder="Search mail" />
+        <input type="text" placeholder="Search mail" id="search-input" />
     </div>
 
     <div class="layout">
@@ -43,12 +41,18 @@
                 </ul>
             </nav>
 
-            <!-- History -->
+            <!-- History Section -->
             <div class="history">
                 <h3>History</h3>
                 {% if history %}
                     {% for email in history %}
-                        <div class="email">{{ email | safe }}</div>
+                        <div class="email" data-timestamp="{{ email.timestamp }}">
+                            <div class="email-header">
+                                <span class="email-subject">{{ email.subject }}</span>
+                                <span class="email-time">{{ email.timestamp.strftime('%Y-%m-%d %H:%M') }}</span>
+                            </div>
+                            <div class="email-preview">{{ email.content[:100] | safe }}...</div>
+                        </div>
                     {% endfor %}
                 {% else %}
                     <p>No emails yet.</p>
@@ -68,9 +72,9 @@
                         <option value="friendly" {% if prefs.default_tone == "friendly" %}selected{% endif %}>Friendly</option>
                     </select>
                     <label>Default Recipient:</label>
-                    <input type="text" name="default_recipient" value="{{ prefs.default_recipient }}" />
+                    <input type="email" name="default_recipient" value="{{ prefs.default_recipient }}" />
                     <label>Signature:</label>
-                    <input type="text" name="signature" value="{{ prefs.signature }}" />
+                    <textarea name="signature">{{ prefs.signature }}</textarea>
                     <label>Phrase:</label>
                     <input type="text" name="phrase" value="{{ prefs.preferred_phrases[0] }}" />
                     <input type="submit" value="Save" />
@@ -87,15 +91,16 @@
         <!-- Main Content -->
         <main class="main-content">
             <form method="POST" id="email-form">
-                <textarea name="input_text" id="input-text" placeholder="Type your prompt or email here..." onkeyup="getSuggestion()"></textarea>
-                <div id="suggestion"></div>
+                <textarea name="input_text" id="input-text" placeholder="Type your prompt or email here..."></textarea>
+                <button id="suggest-btn" type="button">Get Suggestion</button>
+                <div id="suggestion" class="suggestion-box"></div>
                 <div id="loading" style="display: none;">Generating...</div>
 
                 <!-- Action Selection -->
                 <div class="options">
-                    <label><input type="radio" name="action" value="compose" checked onclick="toggleRefineOptions(false)"> Compose</label>
-                    <label><input type="radio" name="action" value="reply" onclick="toggleRefineOptions(false)"> Reply</label>
-                    <label><input type="radio" name="action" value="refine" onclick="toggleRefineOptions(true)"> Refine</label>
+                    <label><input type="radio" name="action" value="compose" checked> Compose</label>
+                    <label><input type="radio" name="action" value="reply"> Reply</label>
+                    <label><input type="radio" name="action" value="refine"> Refine</label>
                 </div>
 
                 <label>Template:</label>
@@ -122,10 +127,25 @@
                 <input type="submit" value="Submit" />
             </form>
 
-            <!-- Output Section -->
+            <!-- Output Section with Email Sending -->
             <section class="output-section">
-                <h2>Generated Email</h2>
-                <pre id="output">{{ output }}</pre>
+                <div class="output-header">
+                    <h2>Generated Email</h2>
+                    <button id="copy-output" class="copy-btn">
+                        <span class="material-icons">content_copy</span> Copy
+                    </button>
+                </div>
+                <pre id="output" contenteditable="true">{{ output | safe }}</pre>
+
+                <!-- Email Sending Fields -->
+                <div class="email-send-form">
+                    <label>Recipient:</label>
+                    <input type="email" id="email-recipient" placeholder="recipient@example.com" required />
+                    <label>Subject:</label>
+                    <input type="text" id="email-subject" placeholder="Subject" required />
+                    <button id="send-email-btn" type="button">Send Email</button>
+                    <div id="email-status" class="status-message"></div>
+                </div>
 
                 <form method="POST" class="feedback-form">
                     <input type="hidden" name="action" value="feedback" />
@@ -143,61 +163,7 @@
         </main>
     </div>
 
-    <!-- Script -->
-    <script>
-        function toggleRefineOptions(show) {
-            document.getElementById("refine-options").style.display = show ? "block" : "none";
-        }
-
-        let debounceTimeout;
-        function getSuggestion() {
-            document.getElementById("loading").style.display = "block";
-            clearTimeout(debounceTimeout);
-            debounceTimeout = setTimeout(() => {
-                const text = document.getElementById("input-text").value;
-                const suggestionDiv = document.getElementById("suggestion");
-                if (text.length > 3) {
-                    console.log("Fetching suggestion for:", text);
-                    fetch("/suggest", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ text: text })
-                    })
-                    .then(response => response.json())
-                    .then(data => {
-                        suggestionDiv.innerText = "Suggestion: " + data.suggestion;
-                        document.getElementById("loading").style.display = "none";
-                    })
-                    .catch(error => {
-                        console.error("Suggestion error:", error);
-                        suggestionDiv.innerText = "Error fetching suggestion";
-                        document.getElementById("loading").style.display = "none";
-                    });
-                } else {
-                    suggestionDiv.innerText = "";
-                    document.getElementById("loading").style.display = "none";
-                }
-            }, 1500);
-        }
-
-        // Theme toggle functionality
-        const toggleButton = document.getElementById("theme-toggle");
-        const icon = toggleButton.querySelector(".material-icons");
-        const text = toggleButton.querySelector(".toggle-text");
-
-        toggleButton.addEventListener("click", () => {
-            const html = document.documentElement;
-            const currentTheme = html.getAttribute("data-theme");
-            if (currentTheme === "dark") {
-                html.setAttribute("data-theme", "light");
-                icon.textContent = "light_mode";
-                text.textContent = "Switch to Dark Theme";
-            } else {
-                html.setAttribute("data-theme", "dark");
-                icon.textContent = "dark_mode";
-                text.textContent = "Switch to Light Theme";
-            }
-        });
-    </script>
+    <!-- External JavaScript -->
+    <script src="/static/script.js"></script>
 </body>
 </html>

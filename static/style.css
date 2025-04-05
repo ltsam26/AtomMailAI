@@ -9,6 +9,7 @@
 body {
     background-color: #f1f3f4;
     color: #202124;
+    line-height: 1.5;
 }
 
 /* Topbar */
@@ -22,10 +23,12 @@ body {
     position: sticky;
     top: 0;
     z-index: 1000;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 .topbar h1 {
     font-size: 22px;
+    font-weight: 500;
 }
 
 #theme-toggle {
@@ -39,6 +42,7 @@ body {
     display: flex;
     align-items: center;
     gap: 8px;
+    transition: background-color 0.2s ease;
 }
 
 #theme-toggle:hover {
@@ -57,6 +61,11 @@ body {
     margin: 12px auto;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
     border: 1px solid #dadce0;
+    transition: box-shadow 0.2s ease;
+}
+
+.search-bar:hover {
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
 }
 
 .search-bar .material-icons {
@@ -81,18 +90,19 @@ body {
 
 /* Sidebar */
 .sidebar {
-    width: 250px;
+    width: 280px;
     background-color: #fff;
     border-right: 1px solid #dadce0;
     padding: 20px;
     overflow-y: auto;
+    transition: width 0.3s ease;
 }
 
 .compose-button {
     background-color: #1a73e8;
     color: white;
     border: none;
-    padding: 10px;
+    padding: 12px;
     width: 100%;
     border-radius: 24px;
     margin-bottom: 20px;
@@ -102,10 +112,12 @@ body {
     align-items: center;
     gap: 8px;
     justify-content: center;
+    transition: background-color 0.2s ease, transform 0.1s ease;
 }
 
 .compose-button:hover {
     background-color: #1557b0;
+    transform: scale(1.02);
 }
 
 .sidebar ul {
@@ -113,13 +125,14 @@ body {
 }
 
 .sidebar li {
-    padding: 10px 15px;
+    padding: 12px 15px;
     cursor: pointer;
     color: #202124;
     border-radius: 8px;
     display: flex;
     align-items: center;
     gap: 10px;
+    transition: background-color 0.2s ease;
 }
 
 .sidebar li.active,
@@ -128,17 +141,58 @@ body {
     font-weight: 500;
 }
 
+/* History */
 .history {
     margin-top: 20px;
 }
 
-.history .email {
-    border-bottom: 1px solid #eee;
-    padding: 10px;
-    white-space: pre-wrap;
-    font-size: 14px;
+.history h3 {
+    font-size: 16px;
+    margin-bottom: 10px;
+    color: #1a73e8;
 }
 
+.email {
+    border-bottom: 1px solid #eee;
+    padding: 12px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.email:hover {
+    background-color: #f8f9fa;
+}
+
+.email-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 5px;
+}
+
+.email-subject {
+    font-weight: 500;
+    color: #202124;
+    max-width: 70%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.email-time {
+    font-size: 12px;
+    color: #5f6368;
+}
+
+.email-preview {
+    font-size: 14px;
+    color: #5f6368;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Preferences */
 .preferences {
     margin-top: 20px;
 }
@@ -146,29 +200,46 @@ body {
 .preferences h3 {
     font-size: 16px;
     margin-bottom: 10px;
+    color: #1a73e8;
 }
 
 .preferences form {
     display: flex;
     flex-direction: column;
+    gap: 10px;
 }
 
 .preferences input,
-.preferences select {
+.preferences select,
+.preferences textarea {
     width: 100%;
-    margin: 5px 0 15px;
+    margin: 5px 0;
     padding: 8px;
     border: 1px solid #dadce0;
     border-radius: 4px;
     font-size: 14px;
+    transition: border-color 0.2s ease;
+}
+
+.preferences input:focus,
+.preferences select:focus,
+.preferences textarea:focus {
+    border-color: #1a73e8;
+    outline: none;
+}
+
+.preferences textarea {
+    height: 80px;
+    resize: vertical;
 }
 
 .preferences input[type="submit"] {
     background-color: #1a73e8;
     color: white;
     border: none;
-    padding: 8px;
+    padding: 10px;
     cursor: pointer;
+    transition: background-color 0.2s ease;
 }
 
 .preferences input[type="submit"]:hover {
@@ -187,6 +258,7 @@ body {
     padding: 20px;
     border-radius: 6px;
     border: 1px solid #dadce0;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
 }
 
 textarea {
@@ -198,26 +270,69 @@ textarea {
     border-radius: 6px;
     resize: vertical;
     font-size: 14px;
+    transition: border-color 0.2s ease;
 }
 
-#suggestion {
-    color: #5f6368;
-    font-style: italic;
+textarea:focus {
+    border-color: #1a73e8;
+    outline: none;
+}
+
+/* Suggestion Button and Box */
+#suggest-btn {
+    background-color: #1a73e8;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    margin: 10px 0;
+    transition: background-color 0.2s ease;
+}
+
+#suggest-btn:hover {
+    background-color: #1557b0;
+}
+
+#suggest-btn:disabled {
+    background-color: #a0c1ff;
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+.suggestion-box {
+    background-color: #f8f9fa;
+    padding: 10px;
+    border-radius: 4px;
     margin-bottom: 10px;
+    border: 1px solid #dadce0;
+    font-size: 14px;
+    color: #5f6368;
+}
+
+.suggestion-box strong {
+    color: #202124;
 }
 
 #loading {
     color: #1a73e8;
     font-style: italic;
+    font-size: 14px;
+    margin-bottom: 10px;
 }
 
 .options {
     margin: 10px 0;
+    display: flex;
+    gap: 20px;
 }
 
 .options label {
-    margin-right: 20px;
+    margin-right: 0;
     font-size: 14px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
 }
 
 .options input[type="radio"] {
@@ -230,43 +345,147 @@ select, input[type="submit"] {
     border: 1px solid #dadce0;
     border-radius: 6px;
     font-size: 14px;
+    transition: border-color 0.2s ease;
+}
+
+select:focus {
+    border-color: #1a73e8;
+    outline: none;
 }
 
 input[type="submit"] {
     background-color: #1a73e8;
     color: white;
     border: none;
+    padding: 10px 20px;
     cursor: pointer;
+    transition: background-color 0.2s ease, transform 0.1s ease;
 }
 
 input[type="submit"]:hover {
     background-color: #1557b0;
+    transform: scale(1.02);
 }
 
 .refine-options {
     margin: 10px 0;
+    padding: 10px;
+    background-color: #f8f9fa;
+    border-radius: 4px;
 }
 
+/* Output Section */
 .output-section {
     background-color: #fff;
     margin-top: 20px;
     padding: 20px;
     border-radius: 6px;
     border: 1px solid #dadce0;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+}
+
+.output-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
 }
 
 .output-section h2 {
     font-size: 18px;
-    margin-bottom: 10px;
+    color: #1a73e8;
+}
+
+.copy-btn {
+    background-color: #1a73e8;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    transition: background-color 0.2s ease;
+}
+
+.copy-btn:hover {
+    background-color: #1557b0;
 }
 
 pre {
     background: #f6f8fa;
-    padding: 10px;
+    padding: 15px;
     white-space: pre-wrap;
     word-break: break-word;
     border-radius: 6px;
     font-size: 14px;
+    border: 1px solid #dadce0;
+}
+
+pre[contenteditable="true"] {
+    outline: none;
+    min-height: 100px;
+}
+
+/* Email Sending Form */
+.email-send-form {
+    margin-top: 15px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.email-send-form label {
+    font-size: 14px;
+    color: #202124;
+}
+
+.email-send-form input {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #dadce0;
+    border-radius: 4px;
+    font-size: 14px;
+    transition: border-color 0.2s ease;
+}
+
+.email-send-form input:focus {
+    border-color: #1a73e8;
+    outline: none;
+}
+
+#send-email-btn {
+    background-color: #34c759;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+#send-email-btn:hover {
+    background-color: #2ca844;
+}
+
+#send-email-btn:disabled {
+    background-color: #a3d9a5;
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+.status-message {
+    font-size: 14px;
+    margin-top: 5px;
+}
+
+.status-message.success {
+    color: #34c759;
+}
+
+.status-message.error {
+    color: #d93025;
 }
 
 .feedback-form {
@@ -282,7 +501,13 @@ pre {
     border-radius: 6px;
 }
 
-/* Dark theme */
+/* Error Styling */
+.error {
+    color: #d93025;
+    font-style: italic;
+}
+
+/* Dark Theme */
 [data-theme="dark"] {
     background-color: #202124;
     color: #e8eaed;
@@ -333,14 +558,23 @@ pre {
 }
 
 [data-theme="dark"] .compose-button,
-[data-theme="dark"] input[type="submit"] {
+[data-theme="dark"] input[type="submit"],
+[data-theme="dark"] #suggest-btn,
+[data-theme="dark"] #send-email-btn {
     background-color: #8ab4f8;
     color: #202124;
 }
 
 [data-theme="dark"] .compose-button:hover,
-[data-theme="dark"] input[type="submit"]:hover {
+[data-theme="dark"] input[type="submit"]:hover,
+[data-theme="dark"] #suggest-btn:hover,
+[data-theme="dark"] #send-email-btn:hover {
     background-color: #669df6;
+}
+
+[data-theme="dark"] #suggest-btn:disabled,
+[data-theme="dark"] #send-email-btn:disabled {
+    background-color: #b3c9ff;
 }
 
 [data-theme="dark"] .sidebar li.active,
@@ -348,10 +582,53 @@ pre {
     background-color: #3c4043;
 }
 
-/* Responsive design */
+[data-theme="dark"] .email:hover {
+    background-color: #3c4043;
+}
+
+[data-theme="dark"] .email-subject {
+    color: #e8eaed;
+}
+
+[data-theme="dark"] .email-preview,
+[data-theme="dark"] .email-time {
+    color: #bdc1c6;
+}
+
+[data-theme="dark"] .suggestion-box {
+    background-color: #3c4043;
+    border-color: #5f6368;
+}
+
+[data-theme="dark"] .copy-btn {
+    background-color: #8ab4f8;
+    color: #202124;
+}
+
+[data-theme="dark"] .copy-btn:hover {
+    background-color: #669df6;
+}
+
+[data-theme="dark"] .history h3,
+[data-theme="dark"] .preferences h3,
+[data-theme="dark"] .output-section h2 {
+    color: #8ab4f8;
+}
+
+[data-theme="dark"] .error,
+[data-theme="dark"] .status-message.error {
+    color: #f28b82;
+}
+
+[data-theme="dark"] .status-message.success {
+    color: #81c995;
+}
+
+/* Responsive Design */
 @media (max-width: 768px) {
     .layout {
         flex-direction: column;
+        height: auto;
     }
 
     .sidebar {
@@ -370,9 +647,40 @@ pre {
 
     .search-bar {
         max-width: 90%;
+        margin: 10px auto;
     }
 
     .compose-button {
         width: 100%;
+    }
+
+    .options {
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .email-send-form {
+        gap: 8px;
+    }
+}
+
+@media (max-width: 480px) {
+    .topbar {
+        padding: 10px 15px;
+    }
+
+    #theme-toggle {
+        padding: 6px 12px;
+        font-size: 14px;
+    }
+
+    .email-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 5px;
+    }
+
+    .email-subject {
+        max-width: 100%;
     }
 }

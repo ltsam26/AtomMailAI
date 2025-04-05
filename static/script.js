@@ -1,0 +1,195 @@
+// static/script.js
+
+// Theme toggle functionality
+function initializeThemeToggle() {
+    const toggleButton = document.getElementById("theme-toggle");
+    const icon = toggleButton.querySelector(".material-icons");
+    const text = toggleButton.querySelector(".toggle-text");
+
+    toggleButton.addEventListener("click", () => {
+        const html = document.documentElement;
+        const currentTheme = html.getAttribute("data-theme");
+        if (currentTheme === "dark") {
+            html.setAttribute("data-theme", "light");
+            icon.textContent = "light_mode";
+            text.textContent = "Switch to Dark Theme";
+        } else {
+            html.setAttribute("data-theme", "dark");
+            icon.textContent = "dark_mode";
+            text.textContent = "Switch to Light Theme";
+        }
+    });
+}
+
+// Toggle refine options
+function toggleRefineOptions(show) {
+    document.getElementById("refine-options").style.display = show ? "block" : "none";
+}
+
+// Suggestion functionality with throttling
+let lastSuggestionTime = 0;
+const SUGGESTION_COOLDOWN = 2000; // 2 seconds in milliseconds
+
+function getSuggestion() {
+    const text = document.getElementById("input-text").value;
+    const suggestionDiv = document.getElementById("suggestion");
+    const loadingDiv = document.getElementById("loading");
+    const suggestBtn = document.getElementById("suggest-btn");
+    const currentTime = Date.now();
+
+    // Check cooldown
+    if (currentTime - lastSuggestionTime < SUGGESTION_COOLDOWN) {
+        suggestionDiv.innerHTML = `<span class="error">Please wait ${Math.ceil((SUGGESTION_COOLDOWN - (currentTime - lastSuggestionTime)) / 1000)} seconds before requesting again</span>`;
+        return;
+    }
+
+    loadingDiv.style.display = "block";
+    suggestionDiv.innerHTML = "";
+    suggestBtn.disabled = true;
+
+    fetch("/suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: text })
+    })
+    .then(response => response.json())
+    .then(data => {
+        loadingDiv.style.display = "none";
+        suggestBtn.disabled = false;
+        lastSuggestionTime = Date.now();
+
+        if (data.status === "success") {
+            suggestionDiv.innerHTML = `<strong>Suggestion (${data.source}):</strong> ${data.suggestion}`;
+            // Auto-fill email fields if suggestion includes To: or Subject:
+            const lines = data.suggestion.split("\n");
+            for (const line of lines) {
+                if (line.startsWith("To:")) {
+                    document.getElementById("email-recipient").value = line.replace("To:", "").trim();
+                } else if (line.startsWith("Subject:")) {
+                    document.getElementById("email-subject").value = line.replace("Subject:", "").trim();
+                }
+            }
+        } else {
+            suggestionDiv.innerHTML = `<span class="error">${data.message}</span>`;
+        }
+    })
+    .catch(error => {
+        loadingDiv.style.display = "none";
+        suggestBtn.disabled = false;
+        suggestionDiv.innerHTML = `<span class="error">Error: ${error.message}</span>`;
+    });
+}
+
+// Send Email functionality with throttling
+let lastSendTime = 0;
+const SEND_COOLDOWN = 3000; // 3 seconds in milliseconds
+
+function sendEmail() {
+    const output = document.getElementById("output").textContent.trim();
+    const recipientInput = document.getElementById("email-recipient");
+    const subjectInput = document.getElementById("email-subject");
+    const sendBtn = document.getElementById("send-email-btn");
+    const statusDiv = document.getElementById("email-status");
+    const currentTime = Date.now();
+
+    // Check cooldown
+    if (currentTime - lastSendTime < SEND_COOLDOWN) {
+        statusDiv.textContent = `Please wait ${Math.ceil((SEND_COOLDOWN - (currentTime - lastSendTime)) / 1000)} seconds before sending again`;
+        statusDiv.className = "status-message error";
+        return;
+    }
+
+    // Parse output for recipient and subject if present
+    let recipient = recipientInput.value.trim();
+    let subject = subjectInput.value.trim();
+    let body = output;
+
+    // Extract from output if fields are empty
+    if (!recipient || !subject) {
+        const lines = output.split("\n");
+        for (const line of lines) {
+            if (line.startsWith("To:") && !recipient) {
+                recipient = line.replace("To:", "").trim();
+            } else if (line.startsWith("Subject:") && !subject) {
+                subject = line.replace("Subject:", "").trim();
+            }
+        }
+    }
+
+    if (!recipient || !subject || !body) {
+        statusDiv.textContent = "Please provide recipient, subject, and body.";
+        statusDiv.className = "status-message error";
+        return;
+    }
+
+    sendBtn.disabled = true;
+    statusDiv.textContent = "Sending...";
+    statusDiv.className = "status-message";
+
+    fetch("/send_email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recipient, subject, body })
+    })
+    .then(response => response.json())
+    .then(data => {
+        sendBtn.disabled = false;
+        lastSendTime = Date.now();
+        statusDiv.textContent = data.message;
+        statusDiv.className = `status-message ${data.status === "success" ? "success" : "error"}`;
+        if (data.status === "success") {
+            setTimeout(() => { statusDiv.textContent = ""; }, 5000); // Clear success message after 5s
+        }
+    })
+    .catch(error => {
+        sendBtn.disabled = false;
+        statusDiv.textContent = `Error: ${error.message}`;
+        statusDiv.className = "status-message error";
+    });
+}
+
+// Copy output functionality
+function initializeCopyButton() {
+    document.getElementById("copy-output").addEventListener("click", () => {
+        const output = document.getElementById("output");
+        navigator.clipboard.writeText(output.textContent);
+        const btn = document.getElementById("copy-output");
+        btn.innerHTML = '<span class="material-icons">check</span> Copied!';
+        setTimeout(() => {
+            btn.innerHTML = '<span class="material-icons">content_copy</span> Copy';
+        }, 2000);
+    });
+}
+
+// History filter functionality
+function filterHistory() {
+    const search = document.getElementById("search-input").value.toLowerCase();
+    const emails = document.getElementsByClassName("email");
+    Array.from(emails).forEach(email => {
+        const subject = email.querySelector(".email-subject").textContent.toLowerCase();
+        const content = email.querySelector(".email-preview").textContent.toLowerCase();
+        email.style.display = (subject.includes(search) || content.includes(search)) ? "block" : "none";
+    });
+}
+
+// Initialize all event listeners
+document.addEventListener("DOMContentLoaded", () => {
+    initializeThemeToggle();
+    initializeCopyButton();
+
+    document.getElementById("suggest-btn").addEventListener("click", getSuggestion);
+    document.getElementById("send-email-btn").addEventListener("click", sendEmail);
+    document.getElementById("search-input").addEventListener("keyup", filterHistory);
+
+    document.querySelectorAll('input[name="action"]').forEach(radio => {
+        radio.addEventListener("change", (e) => {
+            toggleRefineOptions(e.target.value === "refine");
+        });
+    });
+
+    // Auto-toggle refine options based on initial radio state
+    const selectedAction = document.querySelector('input[name="action"]:checked');
+    if (selectedAction) {
+        toggleRefineOptions(selectedAction.value === "refine");
+    }
+});
