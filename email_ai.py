@@ -6,12 +6,14 @@ import google.generativeai as genai
 from cryptography.fernet import Fernet
 import language_tool_python
 from datetime import datetime
+from sentence_transformers import SentenceTransformer
+import numpy as np
 
 # Initialize Flask app
 app = Flask(__name__)
 
 # Gemini API setup
-GOOGLE_API_KEY = "AIzaSyCxhk2hszcNcSzY-Twsa_A5RiJTkmbi580"  # Replace with your key
+GOOGLE_API_KEY = "AIzaSyBC7YMzKKrsfpt42PM9ObZtK7R6-QUHrXo"  
 genai.configure(api_key=GOOGLE_API_KEY)
 model = genai.GenerativeModel('gemini-1.5-flash')
 
@@ -27,14 +29,33 @@ FEEDBACK_FILE = "feedback.json"
 # Grammar checker
 grammar_tool = language_tool_python.LanguageTool('en-US')
 
+# Embedding model
+embedder = SentenceTransformer('all-MiniLM-L6-v2')
+embedding_cache = {}
+suggestion_cache = {}
+
 # Templates
 TEMPLATES = {
     "apology": "Write an email apologizing for a delay in {context}.",
-    "follow-up": "Write a follow-up email about {context}.",
+    "follow-up": "Write an email about {context}.",
     "request": "Write an email requesting {context}."
 }
 
-suggestion_cache = {}
+def get_email_embedding(text):
+    if text in embedding_cache:
+        return embedding_cache[text]
+    embedding = embedder.encode(text)
+    embedding_cache[text] = embedding
+    return embedding
+
+def find_similar_email(prompt, history):
+    if not history:
+        return None
+    prompt_embedding = get_email_embedding(prompt)
+    history_embeddings = [get_email_embedding(email) for email in history]
+    similarities = [np.dot(prompt_embedding, he) / (np.linalg.norm(prompt_embedding) * np.linalg.norm(he)) for he in history_embeddings]
+    max_idx = np.argmax(similarities)
+    return history[max_idx] if similarities[max_idx] > 0.7 else None
 
 def load_email_history(cipher):
     if os.path.exists(HISTORY_FILE):
@@ -113,12 +134,13 @@ def generate_email(prompt, tone=None, recipient=None, template=None):
     prefs = load_user_prefs()
     tone = tone or prefs["default_tone"]
     recipient = recipient or prefs["default_recipient"]
-    history_context = "\n".join(history[-3:]) if history else "No past emails."
+    similar_email = find_similar_email(prompt, history)
+    context = f"Similar past email:\n{similar_email}\n\n" if similar_email else ""
     if template and template in TEMPLATES:
         full_prompt = TEMPLATES[template].format(context=prompt)
     else:
         full_prompt = prompt
-    full_prompt = f"Based on this past email history:\n{history_context}\n\nWrite an email in a {tone} tone to {recipient}: {full_prompt}\nInclude: {prefs['preferred_phrases'][0]}"
+    full_prompt = f"{context}Write an email in a {tone} tone to {recipient}: {full_prompt}\nInclude: {prefs['preferred_phrases'][0]}"
     try:
         response = model.generate_content(
             full_prompt,
@@ -145,8 +167,9 @@ def suggest_reply(email_content):
     prefs = load_user_prefs()
     tone = prefs["default_tone"]
     history = load_email_history(cipher)
-    history_context = "\n".join(history[-3:]) if history else "No past emails."
-    full_prompt = f"Based on this past email history:\n{history_context}\n\nSuggest a reply to this email in a {tone} tone: {email_content}\nInclude: {prefs['preferred_phrases'][0]}"
+    similar_email = find_similar_email(email_content, history)
+    context = f"Similar past email:\n{similar_email}\n\n" if similar_email else ""
+    full_prompt = f"{context}Suggest a reply to this email in a {tone} tone: {email_content}\nInclude: {prefs['preferred_phrases'][0]}"
     try:
         response = model.generate_content(
             full_prompt,
@@ -221,8 +244,9 @@ def suggest():
             return jsonify({"suggestion": ""})
         prefs = load_user_prefs()
         history = load_email_history(cipher)
-        history_context = "\n".join(history[-3:]) if history else "No past emails."
-        full_prompt = f"Based on this past email history:\n{history_context}\n\nSuggest a continuation for: {text}\nUse a {prefs['default_tone']} tone and include: {prefs['preferred_phrases'][0]}"
+        similar_email = find_similar_email(text, history)
+        context = f"Similar past email:\n{similar_email}\n\n" if similar_email else ""
+        full_prompt = f"{context}Suggest a continuation for: {text}\nUse a {prefs['default_tone']} tone and include: {prefs['preferred_phrases'][0]}"
         suggestion = model.generate_content(
             full_prompt,
             generation_config=genai.types.GenerationConfig(max_output_tokens=50)
