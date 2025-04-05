@@ -1,30 +1,28 @@
-import google.generativeai as genai
 import os
 import re
 import json
 from flask import Flask, request, render_template, jsonify
+import google.generativeai as genai
 from cryptography.fernet import Fernet
 import language_tool_python
 from datetime import datetime
 
-# Configure the API key
+# Initialize Flask app
+app = Flask(__name__)
+
+# Gemini API setup
 GOOGLE_API_KEY = "AIzaSyCxhk2hszcNcSzY-Twsa_A5RiJTkmbi580"  # Replace with your key
 genai.configure(api_key=GOOGLE_API_KEY)
-
-# Initialize the Gemini model
-model = genai.GenerativeModel("gemini-1.5-flash")
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 # Encryption setup
-key = b'w6-1ePqZNLFMxJk6EWZeDnyXSeh8Kunwmu-N6QREkWg='  # Replace with your key
+key = b'w6-1ePqZNLFMxJk6EWZeDnyXSeh8Kunwmu-N6QREkWg='
 cipher = Fernet(key)
 
 # File paths
 HISTORY_FILE = "email_history.enc"
 PREFS_FILE = "user_prefs.json"
 FEEDBACK_FILE = "feedback.json"
-
-# Initialize Flask app
-app = Flask(__name__)
 
 # Grammar checker
 grammar_tool = language_tool_python.LanguageTool('en-US')
@@ -36,74 +34,100 @@ TEMPLATES = {
     "request": "Write an email requesting {context}."
 }
 
-def save_email_to_history(email):
-    try:
-        encrypted_email = cipher.encrypt(email.encode('utf-8'))
-        with open(HISTORY_FILE, "ab") as f:
-            f.write(encrypted_email + b"\n---\n")
-    except Exception as e:
-        print(f"Error saving email history: {e}")
+suggestion_cache = {}
 
-def load_email_history():
+def load_email_history(cipher):
     if os.path.exists(HISTORY_FILE):
-        with open(HISTORY_FILE, "rb") as f:
-            lines = f.read().split(b"\n---\n")
-            decrypted = []
-            for line in lines:
-                if line:
-                    try:
-                        decrypted.append(cipher.decrypt(line).decode('utf-8'))
-                    except Exception as e:
-                        print(f"Decryption error: {e}")
-            return decrypted
+        try:
+            with open(HISTORY_FILE, "rb") as f:
+                content = f.read()
+                if not content:
+                    return []
+                lines = content.split(b"\n---\n")
+                decrypted = []
+                for line in lines:
+                    if line:
+                        try:
+                            decrypted.append(cipher.decrypt(line).decode('utf-8'))
+                            print("Decrypted line:", decrypted[-1][:50])
+                        except Exception as e:
+                            print(f"Decryption error: {e}")
+                return decrypted
+        except Exception as e:
+            print(f"History file error: {e}")
+            return []
     return []
 
-def clear_email_history():
-    if os.path.exists(HISTORY_FILE):
-        os.remove(HISTORY_FILE)
+def save_email_to_history(email):
+    try:
+        history = load_email_history(cipher)
+        encrypted_email = cipher.encrypt(email.encode('utf-8'))
+        with open(HISTORY_FILE, "ab") as f:
+            if history:
+                f.write(b"\n---\n")
+            f.write(encrypted_email)
+    except Exception as e:
+        print(f"Save history error: {e}")
 
 def load_user_prefs():
+    default_prefs = {
+        "default_tone": "professional",
+        "default_recipient": "",
+        "signature": "Best regards,\n[Your Name]",
+        "preferred_phrases": ["Looking forward to your response", "Please let me know"]
+    }
     if os.path.exists(PREFS_FILE):
-        with open(PREFS_FILE, "r") as f:
-            return json.load(f)
-    return {"default_tone": "professional", "default_recipient": "Sarah"}
+        try:
+            with open(PREFS_FILE, "r") as f:
+                prefs = json.load(f)
+                default_prefs.update(prefs)
+        except:
+            pass
+    return default_prefs
 
 def save_user_prefs(prefs):
-    with open(PREFS_FILE, "w") as f:
-        json.dump(prefs, f)
+    try:
+        with open(PREFS_FILE, "w") as f:
+            json.dump(prefs, f)
+    except Exception as e:
+        print(f"Save prefs error: {e}")
 
-def save_feedback(prompt, output, rating):
-    feedback = {"prompt": prompt, "output": output, "rating": rating, "timestamp": str(datetime.now())}
-    if os.path.exists(FEEDBACK_FILE):
-        with open(FEEDBACK_FILE, "r") as f:
-            data = json.load(f)
-    else:
-        data = []
-    data.append(feedback)
-    with open(FEEDBACK_FILE, "w") as f:
-        json.dump(data, f)
+def save_feedback(rating):
+    try:
+        feedback = []
+        if os.path.exists(FEEDBACK_FILE):
+            with open(FEEDBACK_FILE, "r") as f:
+                feedback = json.load(f)
+        feedback.append({"rating": rating, "timestamp": datetime.now().isoformat()})
+        with open(FEEDBACK_FILE, "w") as f:
+            json.dump(feedback, f)
+    except Exception as e:
+        print(f"Save feedback error: {e}")
 
 def extract_subject(prompt):
-    match = re.search(r"subject\s*['\"]([^'\"]+)['\"]", prompt, re.IGNORECASE)
-    return match.group(1) if match else None
+    match = re.search(r"subject:\s*(.+)", prompt, re.IGNORECASE)
+    return match.group(1).strip() if match else None
 
 def generate_email(prompt, tone=None, recipient=None, template=None):
+    history = load_email_history(cipher)
     prefs = load_user_prefs()
     tone = tone or prefs["default_tone"]
     recipient = recipient or prefs["default_recipient"]
-    history = "\n".join(load_email_history())
+    history_context = "\n".join(history[-3:]) if history else "No past emails."
     if template and template in TEMPLATES:
         full_prompt = TEMPLATES[template].format(context=prompt)
     else:
         full_prompt = prompt
-    full_prompt = f"Based on this past email history:\n{history}\n\nWrite an email in a {tone} tone to {recipient}: {full_prompt}"
-    
-    response = model.generate_content(
-        full_prompt,
-        generation_config=genai.types.GenerationConfig(max_output_tokens=120, temperature=0.7)
-    )
-    raw_text = response.text
-
+    full_prompt = f"Based on this past email history:\n{history_context}\n\nWrite an email in a {tone} tone to {recipient}: {full_prompt}\nInclude: {prefs['preferred_phrases'][0]}"
+    try:
+        response = model.generate_content(
+            full_prompt,
+            generation_config=genai.types.GenerationConfig(max_output_tokens=120)
+        )
+        raw_text = response.text
+    except Exception as e:
+        print(f"Gemini API error: {e}")
+        return f"Error: {str(e)}"
     subject = extract_subject(prompt) or "Untitled Email"
     if "Subject:" in raw_text:
         lines = raw_text.split("\n")
@@ -112,99 +136,102 @@ def generate_email(prompt, tone=None, recipient=None, template=None):
                 subject = line.replace("Subject:", "").strip()
                 raw_text = "\n".join(lines[:i] + lines[i+1:]).strip()
                 break
-
     corrected_text = grammar_tool.correct(raw_text)
-    email = f"Subject: {subject}\nDear {recipient},\n{corrected_text}\nBest regards,\n[Your Name]"
+    email = f"To: {recipient}\nSubject: {subject}\n\nDear {recipient},\n{corrected_text}\n{prefs['signature']}"
     save_email_to_history(email)
     return email
 
-def suggest_reply(incoming_email, tone=None):
+def suggest_reply(email_content):
     prefs = load_user_prefs()
-    tone = tone or prefs["default_tone"]
-    history = "\n".join(load_email_history())
-    full_prompt = f"Based on this past email history:\n{history}\n\nReply to this email in a {tone} tone: {incoming_email}"
-    
-    subject = extract_subject(incoming_email) or "Your Email"
-    response = model.generate_content(
-        full_prompt,
-        generation_config=genai.types.GenerationConfig(max_output_tokens=100, temperature=0.7)
-    )
-    raw_text = response.text
+    tone = prefs["default_tone"]
+    history = load_email_history(cipher)
+    history_context = "\n".join(history[-3:]) if history else "No past emails."
+    full_prompt = f"Based on this past email history:\n{history_context}\n\nSuggest a reply to this email in a {tone} tone: {email_content}\nInclude: {prefs['preferred_phrases'][0]}"
+    try:
+        response = model.generate_content(
+            full_prompt,
+            generation_config=genai.types.GenerationConfig(max_output_tokens=100)
+        )
+        return grammar_tool.correct(response.text)
+    except Exception as e:
+        print(f"Gemini API error: {e}")
+        return f"Error: {str(e)}"
 
-    corrected_text = grammar_tool.correct(raw_text)
-    reply = f"Subject: Re: {subject}\nDear Sender,\n{corrected_text}\nRegards,\n[Your Name]"
-    save_email_to_history(reply)
-    return reply
-
-def refine_text(text, action="shorten"):
-    action_prompts = {
-        "shorten": "Shorten this text while preserving its core meaning",
-        "improve": "Enhance the clarity, grammar, and flow of this text",
-        "formalize": "Rewrite this text in a formal, polite tone",
-        "casual": "Rewrite this text in a relaxed, casual tone",
-        "professional": "Rewrite this text in a professional, business-like tone",
-        "technical": "Rewrite this text in a technical, precise tone",
-        "friendly": "Rewrite this text in a warm, friendly tone"
+def refine_text(text, action):
+    actions = {
+        "shorten": f"Shorten this text while maintaining its meaning: {text}",
+        "improve": f"Improve the clarity and tone of this text: {text}",
+        "formalize": f"Rewrite this text in a formal tone: {text}",
+        "casual": f"Rewrite this text in a casual tone: {text}"
     }
-    
-    actions = action.lower().split(" and ")
-    current_text = text
-    
-    for act in actions:
-        act = act.strip()
-        if act in action_prompts:
-            prompt = f"{action_prompts[act]}:\n\n{current_text}"
-            response = model.generate_content(
-                prompt,
-                generation_config=genai.types.GenerationConfig(max_output_tokens=150, temperature=0.6)
-            )
-            current_text = grammar_tool.correct(response.text.strip())
-        else:
-            current_text = f"Error: '{act}' is not a valid refinement action."
-            break
-    
-    return current_text
+    if action not in actions:
+        return text
+    try:
+        response = model.generate_content(
+            actions[action],
+            generation_config=genai.types.GenerationConfig(max_output_tokens=120)
+        )
+        return grammar_tool.correct(response.text)
+    except Exception as e:
+        print(f"Gemini API error: {e}")
+        return f"Error: {str(e)}"
 
 @app.route("/", methods=["GET", "POST"])
 def home():
     output = ""
-    history = load_email_history()
+    history = load_email_history(cipher)
     prefs = load_user_prefs()
-    
     if request.method == "POST":
-        action = request.form["action"]
+        action = request.form.get("action")
         input_text = request.form.get("input_text", "")
-        
+        template = request.form.get("template")
         if action == "compose":
-            template = request.form.get("template")
             output = generate_email(input_text, template=template)
         elif action == "reply":
             output = suggest_reply(input_text)
         elif action == "refine":
-            refine_action = request.form["refine_action"]
+            refine_action = request.form.get("refine_action", "improve")
             output = refine_text(input_text, refine_action)
         elif action == "clear_history":
-            clear_email_history()
-            output = "Email history cleared."
+            if os.path.exists(HISTORY_FILE):
+                os.remove(HISTORY_FILE)
+            history = []
+            output = "History cleared."
         elif action == "save_prefs":
-            prefs["default_tone"] = request.form["default_tone"]
-            prefs["default_recipient"] = request.form["default_recipient"]
+            prefs["default_tone"] = request.form.get("default_tone", "professional")
+            prefs["default_recipient"] = request.form.get("default_recipient", "")
+            prefs["signature"] = request.form.get("signature", "Best regards,\n[Your Name]")
+            prefs["preferred_phrases"] = [request.form.get("phrase", "Looking forward to your response")]
             save_user_prefs(prefs)
             output = "Preferences saved."
         elif action == "feedback":
-            rating = request.form["rating"]
-            save_feedback(input_text, output, rating)
-            output = "Feedback submitted. Thank you!"
-    
+            rating = request.form.get("rating")
+            if rating:
+                save_feedback(int(rating))
+                output = "Feedback submitted."
     return render_template("index.html", output=output, history=history, prefs=prefs, templates=TEMPLATES.keys())
 
 @app.route("/suggest", methods=["POST"])
 def suggest():
-    text = request.json.get("text", "")
-    if text:
-        suggestion = model.generate_content(f"Suggest a continuation for: {text}", max_output_tokens=50).text
+    try:
+        text = request.json.get("text", "")
+        if text in suggestion_cache:
+            return jsonify({"suggestion": suggestion_cache[text]})
+        if len(text) < 4:
+            return jsonify({"suggestion": ""})
+        prefs = load_user_prefs()
+        history = load_email_history(cipher)
+        history_context = "\n".join(history[-3:]) if history else "No past emails."
+        full_prompt = f"Based on this past email history:\n{history_context}\n\nSuggest a continuation for: {text}\nUse a {prefs['default_tone']} tone and include: {prefs['preferred_phrases'][0]}"
+        suggestion = model.generate_content(
+            full_prompt,
+            generation_config=genai.types.GenerationConfig(max_output_tokens=50)
+        ).text
+        suggestion_cache[text] = suggestion
         return jsonify({"suggestion": suggestion})
-    return jsonify({"suggestion": ""})
+    except Exception as e:
+        print(f"Suggestion error: {e}")
+        return jsonify({"suggestion": "Error generating suggestion"})
 
 if __name__ == "__main__":
     app.run(debug=True)

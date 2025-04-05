@@ -1,139 +1,104 @@
 <!DOCTYPE html>
-<html data-theme="light">
+<html>
 <head>
     <title>Atom Mail AI</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; display: flex; }
+        .sidebar { width: 30%; padding: 20px; background: #f9f9f9; border-right: 1px solid #ddd; }
+        .main { width: 70%; padding: 20px; }
+        textarea { width: 100%; height: 120px; border: 1px solid #ccc; border-radius: 4px; padding: 10px; }
+        .history .email { border-bottom: 1px solid #eee; padding: 10px; white-space: pre-wrap; font-size: 14px; }
+        #suggestion { color: #666; margin: 10px 0; font-style: italic; }
+        #loading { display: none; color: #007bff; font-style: italic; }
+        button { padding: 8px 16px; margin-right: 10px; background: #007bff; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        select, input { padding: 8px; margin: 5px 0; border: 1px solid #ccc; border-radius: 4px; }
+    </style>
 </head>
 <body>
-    <div class="container">
-        <div class="sidebar">
-            <h2>Inbox (History)</h2>
-            <div class="history">
-                {% if history %}
-                    {% for email in history %}
-                        <div class="email">{{ email }}</div>
-                    {% endfor %}
-                {% else %}
-                    <p>No emails yet.</p>
-                {% endif %}
-            </div>
-            <form method="POST">
-                <input type="hidden" name="action" value="clear_history">
-                <input type="submit" value="Clear History">
-            </form>
-            
-            <h2>Preferences</h2>
-            <form method="POST">
-                <input type="hidden" name="action" value="save_prefs">
-                <label>Default Tone:</label>
-                <select name="default_tone">
-                    <option value="professional" {% if prefs.default_tone == "professional" %}selected{% endif %}>Professional</option>
-                    <option value="formal" {% if prefs.default_tone == "formal" %}selected{% endif %}>Formal</option>
-                    <option value="casual" {% if prefs.default_tone == "casual" %}selected{% endif %}>Casual</option>
-                    <option value="friendly" {% if prefs.default_tone == "friendly" %}selected{% endif %}>Friendly</option>
-                </select><br>
-                <label>Default Recipient:</label>
-                <input type="text" name="default_recipient" value="{{ prefs.default_recipient }}"><br>
-                <input type="submit" value="Save Preferences">
-            </form>
-        </div>
-        
-        <div class="main">
-            <h1>Atom Mail AI</h1>
-            <div class="section">
-                <form method="POST" id="email-form">
-                    <textarea name="input_text" id="input-text" placeholder="Type your prompt or email here..." onkeyup="getSuggestion()"></textarea><br>
-                    <div id="suggestion"></div>
-                    <input type="radio" name="action" value="compose" checked onclick="toggleRefineOptions(false)"> Compose
-                    <input type="radio" name="action" value="reply" onclick="toggleRefineOptions(false)"> Reply
-                    <input type="radio" espetive-action" value="refine" onclick="toggleRefineOptions(true)"> Refine<br>
-                    <label>Template:</label>
-                    <select name="template">
-                        <option value="">None</option>
-                        {% for template in templates %}
-                            <option value="{{ template }}">{{ template|capitalize }}</option>
-                        {% endfor %}
-                    </select><br>
-                    <div class="refine-options" id="refine-options">
-                        <label>Refinement Action:</label>
-                        <select name="refine_action">
-                            <option value="shorten">Shorten</option>
-                            <option value="improve">Improve</option>
-                            <option value="formalize">Formalize</option>
-                            <option value="casual">Casual</option>
-                            <option value="professional">Professional</option>
-                            <option value="technical">Technical</option>
-                            <option value="friendly">Friendly</option>
-                            <option value="shorten and formalize">Shorten and Formalize</option>
-                        </select>
-                    </div>
-                    <input type="submit" value="Submit">
-                </form>
-            </div>
-
-            <button id="theme-toggle">Switch to Dark Theme</button>
-
-            <div class="section">
-                <h2>Output</h2>
-                <pre id="output">{{ output }}</pre>
-                <div class="feedback">
-                    <form method="POST">
-                        <input type="hidden" name="action" value="feedback">
-                        <input type="hidden" name="input_text" value="{{ request.form.input_text }}">
-                        <label>Rate this output:</label>
-                        <select name="rating">
-                            <option value="1">1 (Poor)</option>
-                            <option value="2">2</option>
-                            <option value="3">3</option>
-                            <option value="4">4</option>
-                            <option value="5">5 (Great)</option>
-                        </select>
-                        <input type="submit" value="Submit Feedback">
-                    </form>
-                </div>
-            </div>
+    <div class="sidebar">
+        <h2>Inbox (History)</h2>
+        <div class="history">
+            {% if history %}
+                {% for email in history %}
+                    <div class="email">{{ email | safe }}</div>
+                {% endfor %}
+            {% else %}
+                <p>No emails yet.</p>
+            {% endif %}
         </div>
     </div>
-    
+    <div class="main">
+        <h1>Atom Mail AI</h1>
+        <form method="post">
+            <textarea name="input_text" id="input-text" placeholder="Type your prompt or email here..." oninput="getSuggestion()"></textarea>
+            <div id="suggestion"></div>
+            <div id="loading">Generating...</div>
+            <select name="template">
+                <option value="">Select Template</option>
+                {% for key in templates %}
+                    <option value="{{ key }}">{{ key.capitalize() }}</option>
+                {% endfor %}
+            </select>
+            <button type="submit" name="action" value="compose">Compose</button>
+            <button type="submit" name="action" value="reply">Reply</button>
+            <button type="submit" name="action" value="refine" onclick="toggleRefineOptions(true)">Refine</button>
+            <div id="refine-options" style="display: none;">
+                <select name="refine_action">
+                    <option value="shorten">Shorten</option>
+                    <option value="improve">Improve</option>
+                    <option value="formalize">Formalize</option>
+                    <option value="casual">Casual</option>
+                </select>
+            </div>
+            <button type="submit" name="action" value="clear_history">Clear History</button>
+            <h3>Preferences</h3>
+            <label>Tone: <input name="default_tone" value="{{ prefs.default_tone }}"></label>
+            <label>Recipient: <input name="default_recipient" value="{{ prefs.default_recipient }}"></label>
+            <label>Signature: <input name="signature" value="{{ prefs.signature }}"></label>
+            <label>Phrase: <input name="phrase" value="{{ prefs.preferred_phrases[0] }}"></label>
+            <button type="submit" name="action" value="save_prefs">Save Preferences</button>
+            <h3>Feedback</h3>
+            <label>Rating: <input name="rating" type="number" min="1" max="5"></label>
+            <button type="submit" name="action" value="feedback">Submit Feedback</button>
+        </form>
+        <h2>Output</h2>
+        <pre>{{ output }}</pre>
+    </div>
     <script>
         function toggleRefineOptions(show) {
             document.getElementById("refine-options").style.display = show ? "block" : "none";
         }
-
+        let debounceTimeout;
         function getSuggestion() {
-            const text = document.getElementById("input-text").value;
-            const suggestionDiv = document.getElementById("suggestion");
-            if (text.length > 3) {
-                fetch("/suggest", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ text: text })
-                })
-                .then(response => response.json())
-                .then(data => {
-                    suggestionDiv.innerText = "Suggestion: " + data.suggestion;
-                })
-                .catch(error => {
-                    console.error("Suggestion error:", error);
-                    suggestionDiv.innerText = "Error fetching suggestion";
-                });
-            } else {
-                suggestionDiv.innerText = "";
-            }
+            document.getElementById("loading").style.display = "block";
+            clearTimeout(debounceTimeout);
+            debounceTimeout = setTimeout(() => {
+                const text = document.getElementById("input-text").value;
+                const suggestionDiv = document.getElementById("suggestion");
+                if (text.length > 3) {
+                    console.log("Fetching suggestion for:", text);
+                    fetch("/suggest", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ text: text })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        suggestionDiv.innerText = "Suggestion: " + data.suggestion;
+                        document.getElementById("loading").style.display = "none";
+                    })
+                    .catch(error => {
+                        console.error("Suggestion error:", error);
+                        suggestionDiv.innerText = "Error fetching suggestion";
+                        document.getElementById("loading").style.display = "none";
+                    });
+                } else {
+                    suggestionDiv.innerText = "";
+                    document.getElementById("loading").style.display = "none";
+                }
+            }, 1500);
         }
-
-        const toggleButton = document.getElementById('theme-toggle');
-        toggleButton.addEventListener('click', () => {
-            const html = document.documentElement;
-            const currentTheme = html.getAttribute('data-theme');
-            if (currentTheme === 'dark') {
-                html.setAttribute('data-theme', 'light');
-                toggleButton.textContent = 'Switch to Dark Theme';
-            } else {
-                html.setAttribute('data-theme', 'dark');
-                toggleButton.textContent = 'Switch to Light Theme';
-            }
-        });
     </script>
 </body>
 </html>
