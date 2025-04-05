@@ -8,7 +8,7 @@ import language_tool_python
 from datetime import datetime
 
 # Configure the API key
-GOOGLE_API_KEY = "AIzaSyBgc6ZxaiTsnFli9HB9-nYXhnGuBhSrsAc"  # Replace with your key
+GOOGLE_API_KEY = "AIzaSyCxhk2hszcNcSzY-Twsa_A5RiJTkmbi580"  # Replace with your key
 genai.configure(api_key=GOOGLE_API_KEY)
 
 # Initialize the Gemini model
