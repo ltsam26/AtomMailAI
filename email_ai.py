@@ -5,7 +5,7 @@ import time
 import logging
 import numpy as np
 from datetime import datetime
-from flask import Flask, request, render_template, jsonify, redirect, url_for
+from flask import Flask, request, render_template, jsonify
 from flask_socketio import SocketIO, emit
 import google.generativeai as genai
 from cryptography.fernet import Fernet
@@ -18,18 +18,28 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 import base64
 from email.mime.text import MIMEText
+from dotenv import load_dotenv
+
+# Setup logging at the top
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Load environment variables
+load_dotenv()
 
 # Initialize Flask app and SocketIO
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Gemini API setup
-GOOGLE_API_KEY = "AIzaSyBC7YMzKKrsfpt42PM9ObZtK7R6-QUHrXo"  # Replace with your Gemini API key
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+if not GOOGLE_API_KEY:
+    raise ValueError("GOOGLE_API_KEY not set in .env")
 genai.configure(api_key=GOOGLE_API_KEY)
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 # Gmail API setup
-SCOPES = ['https://www.googleapis.com/auth/gmail.modify']  # Allows read/write access
+SCOPES = ['https://www.googleapis.com/auth/gmail.modify']
 CREDENTIALS_FILE = "credentials.json"
 TOKEN_FILE = "token.json"
 
@@ -39,31 +49,44 @@ def get_gmail_service():
         creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
+            try:
+                creds.refresh(Request())
+            except Exception as e:
+                logger.error(f"Token refresh failed: {e}")
+                raise
         else:
             flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
-            creds = flow.run_local_server(
-                port=5000,  # Match Flask port
-                redirect_uri="http://localhost:5000/oauth2callback",  # Explicit redirect URI
-                prompt="consent"  # Force consent screen for testing
-            )
+            creds = flow.run_local_server(port=5000, redirect_uri="http://localhost:5000/oauth2callback")
         with open(TOKEN_FILE, 'w') as token:
             token.write(creds.to_json())
     return build('gmail', 'v1', credentials=creds)
 
-# Encryption setup
-key = b'w6-1ePqZNLFMxJk6EWZeDnyXSeh8Kunwmu-N6QREkWg='
-cipher = Fernet(key)
+# Encryption setup with validation
+ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
+if not ENCRYPTION_KEY:
+    raise ValueError("ENCRYPTION_KEY not set in .env")
+
+# Validate and fix the encryption key
+try:
+    # Strip whitespace and ensure proper padding
+    ENCRYPTION_KEY = ENCRYPTION_KEY.strip()
+    # Add padding if necessary (base64 strings should be a multiple of 4 in length)
+    padding_needed = (4 - len(ENCRYPTION_KEY) % 4) % 4
+    ENCRYPTION_KEY += "=" * padding_needed
+    # Attempt to create Fernet instance
+    cipher = Fernet(ENCRYPTION_KEY)
+    logger.info("Encryption key loaded successfully")
+except ValueError as e:
+    logger.error(f"Invalid ENCRYPTION_KEY: {ENCRYPTION_KEY[:10]}... (length: {len(ENCRYPTION_KEY)}). Error: {e}")
+    raise ValueError("ENCRYPTION_KEY must be a valid 32-byte URL-safe base64-encoded string. Check your .env file.")
 
 # File paths
 HISTORY_FILE = "email_history.enc"
 PREFS_FILE = "user_prefs.json"
 FEEDBACK_FILE = "feedback.json"
 
-# Grammar checker
+# Grammar checker and embedding model
 grammar_tool = language_tool_python.LanguageTool('en-US')
-
-# Embedding model
 embedder = SentenceTransformer('all-MiniLM-L6-v2')
 embedding_cache = {}
 suggestion_cache = {}
@@ -74,10 +97,6 @@ TEMPLATES = {
     "follow-up": "Write an email following up about {context}.",
     "request": "Write an email requesting {context}."
 }
-
-# Setup logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 # Email Entry class
 class EmailEntry:
@@ -91,11 +110,7 @@ class EmailEntry:
         return match.group(1).strip() if match else "Untitled"
 
     def to_dict(self):
-        return {
-            "content": self.content,
-            "timestamp": self.timestamp.isoformat(),
-            "subject": self.subject
-        }
+        return {"content": self.content, "timestamp": self.timestamp.isoformat(), "subject": self.subject}
 
 # Utility functions
 def get_email_embedding(text):
@@ -126,15 +141,11 @@ def load_email_history(cipher):
                 history = []
                 for line in lines:
                     if line:
-                        try:
-                            decrypted = cipher.decrypt(line).decode('utf-8')
-                            timestamp_match = re.search(r"Timestamp: (.+)\n", decrypted)
-                            timestamp = (datetime.fromisoformat(timestamp_match.group(1))
-                                        if timestamp_match else datetime.now())
-                            content = re.sub(r"Timestamp: .+\n", "", decrypted)
-                            history.append(EmailEntry(content, timestamp))
-                        except Exception as e:
-                            logger.error(f"Decryption error: {e}")
+                        decrypted = cipher.decrypt(line).decode('utf-8')
+                        timestamp_match = re.search(r"Timestamp: (.+)\n", decrypted)
+                        timestamp = datetime.fromisoformat(timestamp_match.group(1)) if timestamp_match else datetime.now()
+                        content = re.sub(r"Timestamp: .+\n", "", decrypted)
+                        history.append(EmailEntry(content, timestamp))
                 return sorted(history, key=lambda x: x.timestamp, reverse=True)
         except Exception as e:
             logger.error(f"History file error: {e}")
@@ -158,7 +169,7 @@ def load_user_prefs():
         "default_tone": "professional",
         "default_recipient": "",
         "signature": "Best regards,\n[Your Name]",
-        "preferred_phrases": ["Looking forward to your response", "Please let me know"]
+        "preferred_phrases": ["Looking forward to your response"]
     }
     if os.path.exists(PREFS_FILE):
         try:
@@ -206,8 +217,11 @@ def send_email(recipient, subject, body):
         save_email_to_history(f"To: {recipient}\nSubject: {subject}\n\n{body}")
         return True
     except HttpError as e:
-        logger.error(f"Gmail API error: {str(e)}")
-        return False
+        logger.error(f"Gmail API error: {e} - {e.content}")
+        raise Exception(f"Gmail API error: {e.status_code} - {e.reason}")
+    except Exception as e:
+        logger.error(f"Unexpected error in send_email: {e}")
+        raise
 
 def check_new_emails():
     try:
@@ -215,7 +229,7 @@ def check_new_emails():
         results = service.users().messages().list(userId="me", labelIds=["INBOX"], q="is:unread").execute()
         messages = results.get("messages", [])
         emails = []
-        for msg in messages[:5]:  # Limit to last 5 unread emails
+        for msg in messages[:5]:
             msg_data = service.users().messages().get(userId="me", id=msg["id"]).execute()
             headers = msg_data["payload"]["headers"]
             subject = next(h["value"] for h in headers if h["name"] == "Subject")
@@ -225,7 +239,7 @@ def check_new_emails():
         socketio.emit("new_emails", {"emails": emails}, namespace="/email")
         return emails
     except HttpError as e:
-        logger.error(f"Gmail API error: {str(e)}")
+        logger.error(f"Gmail API error in check_new_emails: {str(e)}")
         return []
 
 # Email generation and processing functions
@@ -249,10 +263,7 @@ def generate_email(prompt, tone=None, recipient=None, template=None):
     try:
         response = model.generate_content(
             full_prompt,
-            generation_config=genai.types.GenerationConfig(
-                max_output_tokens=150,
-                temperature=0.7
-            )
+            generation_config=genai.types.GenerationConfig(max_output_tokens=150, temperature=0.7)
         )
         raw_text = response.text.strip()
     except Exception as e:
@@ -274,7 +285,6 @@ def generate_email(prompt, tone=None, recipient=None, template=None):
              f"Dear {recipient},\n\n"
              f"{corrected_text}\n\n"
              f"{prefs['signature']}")
-
     save_email_to_history(email)
     return email
 
@@ -292,10 +302,7 @@ def suggest_reply(email_content):
     try:
         response = model.generate_content(
             full_prompt,
-            generation_config=genai.types.GenerationConfig(
-                max_output_tokens=120,
-                temperature=0.7
-            )
+            generation_config=genai.types.GenerationConfig(max_output_tokens=120, temperature=0.7)
         )
         return grammar_tool.correct(response.text.strip())
     except Exception as e:
@@ -317,10 +324,7 @@ def refine_text(text, action):
     try:
         response = model.generate_content(
             actions[action],
-            generation_config=genai.types.GenerationConfig(
-                max_output_tokens=150,
-                temperature=0.7
-            )
+            generation_config=genai.types.GenerationConfig(max_output_tokens=150, temperature=0.7)
         )
         return grammar_tool.correct(response.text.strip())
     except Exception as e:
@@ -364,13 +368,7 @@ def home():
                 save_feedback(int(rating))
                 output = "Feedback submitted successfully."
 
-    return render_template(
-        "index.html",
-        output=output,
-        history=history,
-        prefs=prefs,
-        templates=TEMPLATES.keys()
-    )
+    return render_template("index.html", output=output, history=history, prefs=prefs, templates=TEMPLATES.keys())
 
 @app.route("/suggest", methods=["POST"])
 def suggest():
@@ -378,113 +376,58 @@ def suggest():
         data = request.get_json()
         text = data.get("text", "").strip()
         if not text:
-            return jsonify({
-                "suggestion": "",
-                "status": "error",
-                "message": "No input text provided",
-                "source": "client"
-            }), 400
+            return jsonify({"suggestion": "", "status": "error", "message": "No input text provided"}), 400
 
         if len(text) < 10:
-            return jsonify({
-                "suggestion": "",
-                "status": "warning",
-                "message": "Text too short for meaningful suggestion",
-                "source": "client"
-            }), 200
+            return jsonify({"suggestion": "", "status": "warning", "message": "Text too short"}), 200
 
         if text in suggestion_cache:
-            logger.info(f"Returning cached suggestion for: {text[:50]}...")
-            return jsonify({
-                "suggestion": suggestion_cache[text],
-                "status": "success",
-                "message": "Retrieved from cache",
-                "source": "cache",
-                "cached": True
-            }), 200
+            return jsonify({"suggestion": suggestion_cache[text], "status": "success", "message": "From cache"}), 200
 
         prefs = load_user_prefs()
         history = load_email_history(cipher)
         similar_email = find_similar_email(text, history)
         context = f"Similar past email:\n{similar_email}\n\n" if similar_email else ""
 
-        full_prompt = (
-            f"{context}Generate a concise email suggestion based on: {text}\n"
-            f"Use a {prefs['default_tone']} tone and include: {prefs['preferred_phrases'][0]}\n"
-            f"Do not continue the text directly, provide a complete suggestion instead"
-        )
-
-        current_time = time.time()
-        last_suggestion_time = getattr(suggest, 'last_api_call', 0)
-        if current_time - last_suggestion_time < 2:
-            return jsonify({
-                "suggestion": "",
-                "status": "warning",
-                "message": "Please wait a moment before requesting another suggestion",
-                "source": "cooldown"
-            }), 429
-
-        logger.info(f"Calling API for suggestion: {text[:50]}...")
-        response = model.generate_content(
-            full_prompt,
-            generation_config=genai.types.GenerationConfig(
-                max_output_tokens=80,
-                temperature=0.7,
-                top_p=0.9
-            )
-        )
+        full_prompt = (f"{context}Generate a concise email suggestion based on: {text}\n"
+                       f"Use a {prefs['default_tone']} tone and include: {prefs['preferred_phrases'][0]}")
+        
+        response = model.generate_content(full_prompt, generation_config=genai.types.GenerationConfig(max_output_tokens=80, temperature=0.7))
         suggestion = grammar_tool.correct(response.text.strip())
-
         suggestion_cache[text] = suggestion
-        suggest.last_api_call = time.time()
-        if len(suggestion_cache) > 1000:
-            suggestion_cache.pop(next(iter(suggestion_cache)))
-
-        return jsonify({
-            "suggestion": suggestion,
-            "status": "success",
-            "message": "Suggestion generated successfully",
-            "source": "api",
-            "cached": False
-        }), 200
-
-    except ValueError as ve:
-        logger.error(f"Value error in suggestion: {str(ve)}")
-        return jsonify({
-            "suggestion": "",
-            "status": "error",
-            "message": f"Invalid input: {str(ve)}",
-            "source": "client"
-        }), 400
-
+        return jsonify({"suggestion": suggestion, "status": "success", "message": "Generated"}), 200
     except Exception as e:
-        logger.error(f"Suggestion generation failed: {str(e)}", exc_info=True)
-        return jsonify({
-            "suggestion": "",
-            "status": "error",
-            "message": "Failed to generate suggestion",
-            "source": "server"
-        }), 500
+        logger.error(f"Suggestion error: {e}")
+        return jsonify({"suggestion": "", "status": "error", "message": str(e)}), 500
 
 @app.route("/send_email", methods=["POST"])
 def send_email_route():
     try:
         data = request.get_json()
+        if not data:
+            return jsonify({"status": "error", "message": "No JSON data provided"}), 400
+
         recipient = data.get("recipient", "").strip()
         subject = data.get("subject", "").strip()
         body = data.get("body", "").strip()
 
         if not all([recipient, subject, body]):
-            return jsonify({"status": "error", "message": "Missing required fields"}), 400
+            return jsonify({"status": "error", "message": "Missing required fields: recipient, subject, or body"}), 400
+
+        # Validate email format
+        if not re.match(r"[^@]+@[^@]+\.[^@]+", recipient):
+            return jsonify({"status": "error", "message": "Invalid email address"}), 400
 
         success = send_email(recipient, subject, body)
         if success:
             return jsonify({"status": "success", "message": "Email sent successfully"}), 200
         else:
             return jsonify({"status": "error", "message": "Failed to send email"}), 500
+    except HttpError as e:
+        return jsonify({"status": "error", "message": f"Gmail API error: {e.reason}"}), 500
     except Exception as e:
         logger.error(f"Send email error: {str(e)}")
-        return jsonify({"status": "error", "message": "Server error"}), 500
+        return jsonify({"status": "error", "message": f"Server error: {str(e)}"}), 500
 
 @app.route("/check_emails", methods=["GET"])
 def check_emails_route():
@@ -495,7 +438,6 @@ def check_emails_route():
         logger.error(f"Check emails error: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# OAuth callback route
 @app.route("/oauth2callback")
 def oauth2callback():
     return "Authorization complete. You can close this window."
@@ -504,7 +446,7 @@ def oauth2callback():
 def poll_emails():
     while True:
         check_new_emails()
-        time.sleep(60)  # Poll every 60 seconds
+        time.sleep(60)
 
 import threading
 threading.Thread(target=poll_emails, daemon=True).start()

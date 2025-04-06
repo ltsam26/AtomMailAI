@@ -26,10 +26,13 @@ function toggleRefineOptions(show) {
     document.getElementById("refine-options").style.display = show ? "block" : "none";
 }
 
-// Suggestion functionality with throttling
-let lastSuggestionTime = 0;
+// Throttling constants
 const SUGGESTION_COOLDOWN = 2000; // 2 seconds
+const SEND_COOLDOWN = 3000; // 3 seconds
+let lastSuggestionTime = 0;
+let lastSendTime = 0;
 
+// Suggestion functionality
 function getSuggestion() {
     const text = document.getElementById("input-text").value;
     const suggestionDiv = document.getElementById("suggestion");
@@ -49,7 +52,7 @@ function getSuggestion() {
     fetch("/suggest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: text })
+        body: JSON.stringify({ text })
     })
     .then(response => response.json())
     .then(data => {
@@ -78,14 +81,12 @@ function getSuggestion() {
     });
 }
 
-// Send Email functionality with throttling
-let lastSendTime = 0;
-const SEND_COOLDOWN = 3000; // 3 seconds
-
+// Send Email functionality (combined version)
 function sendEmail() {
-    const output = document.getElementById("output").textContent.trim();
-    const recipientInput = document.getElementById("email-recipient");
-    const subjectInput = document.getElementById("email-subject");
+    const recipientInput = document.getElementById("email-recipient") || document.getElementById("recipient");
+    const subjectInput = document.getElementById("email-subject") || document.getElementById("subject");
+    const bodyInput = document.getElementById("email-body");
+    const output = document.getElementById("output");
     const sendBtn = document.getElementById("send-email-btn");
     const statusDiv = document.getElementById("email-status");
     const currentTime = Date.now();
@@ -98,15 +99,18 @@ function sendEmail() {
 
     let recipient = recipientInput.value.trim();
     let subject = subjectInput.value.trim();
-    let body = output;
+    let body = bodyInput ? bodyInput.value.trim() : output.textContent.trim();
 
-    if (!recipient || !subject) {
-        const lines = output.split("\n");
+    // Fallback to parsing output if fields are empty
+    if (!recipient || !subject || !body) {
+        const lines = output.textContent.split("\n");
         for (const line of lines) {
             if (line.startsWith("To:") && !recipient) {
                 recipient = line.replace("To:", "").trim();
             } else if (line.startsWith("Subject:") && !subject) {
                 subject = line.replace("Subject:", "").trim();
+            } else if (!body && line.trim() && !line.startsWith("To:") && !line.startsWith("Subject:")) {
+                body = lines.slice(lines.indexOf(line)).join("\n").trim();
             }
         }
     }
@@ -134,12 +138,16 @@ function sendEmail() {
         statusDiv.className = `status-message ${data.status === "success" ? "success" : "error"}`;
         if (data.status === "success") {
             setTimeout(() => { statusDiv.textContent = ""; }, 5000);
+            alert("Email sent successfully!");
+        } else {
+            alert(`Error: ${data.message}`);
         }
     })
     .catch(error => {
         sendBtn.disabled = false;
         statusDiv.textContent = `Error: ${error.message}`;
         statusDiv.className = "status-message error";
+        console.error("Send email error:", error);
     });
 }
 
@@ -167,7 +175,7 @@ function filterHistory() {
     });
 }
 
-// Display emails in inbox (combined displayEmails and updateEmailList)
+// Display emails in inbox
 function displayEmails(emails) {
     const emailList = document.getElementById("email-list");
     emailList.innerHTML = "";
