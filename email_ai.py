@@ -3,18 +3,24 @@ import re
 import json
 import time
 import logging
+import threading
 import smtplib
+import imaplib2
+import email
 from email.mime.text import MIMEText
+from email.header import decode_header
 import numpy as np
 from datetime import datetime
 from flask import Flask, request, render_template, jsonify
+from flask_socketio import SocketIO, emit
 import google.generativeai as genai
 from cryptography.fernet import Fernet
 import language_tool_python
 from sentence_transformers import SentenceTransformer
 
-# Initialize Flask app
+# Initialize Flask app and SocketIO
 app = Flask(__name__)
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Gemini API setup
 GOOGLE_API_KEY = "AIzaSyBC7YMzKKrsfpt42PM9ObZtK7R6-QUHrXo"  # Replace with your API key
@@ -23,9 +29,10 @@ model = genai.GenerativeModel('gemini-1.5-flash')
 
 # Email configuration
 EMAIL_SENDER = "your-email@gmail.com"  # Replace with your email
-EMAIL_PASSWORD = "your-app-password"  # Use App Password for Gmail with 2FA
+EMAIL_PASSWORD = "your-app-password"  # Replace with your App Password
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
+IMAP_SERVER = "imap.gmail.com"
 
 # Encryption setup
 key = b'w6-1ePqZNLFMxJk6EWZeDnyXSeh8Kunwmu-N6QREkWg='
@@ -55,7 +62,7 @@ TEMPLATES = {
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Email Entry class for history management
+# Email Entry class
 class EmailEntry:
     def __init__(self, content, timestamp=None):
         self.content = content
@@ -168,7 +175,7 @@ def extract_subject(prompt):
     match = re.search(r"subject:\s*(.+)", prompt, re.IGNORECASE)
     return match.group(1).strip() if match else None
 
-# Email generation and processing functions
+# Email generation and processing
 def generate_email(prompt, tone=None, recipient=None, template=None):
     history = load_email_history(cipher)
     prefs = load_user_prefs()
@@ -267,7 +274,7 @@ def refine_text(text, action):
         logger.error(f"Gemini API error: {e}")
         return f"Error: {str(e)}"
 
-# Email sending function
+# SMTP Email Sending
 def send_email(recipient, subject, body):
     try:
         msg = MIMEText(body)
@@ -280,11 +287,65 @@ def send_email(recipient, subject, body):
             server.login(EMAIL_SENDER, EMAIL_PASSWORD)
             server.send_message(msg)
             logger.info(f"Email sent to {recipient}")
-        save_email_to_history(f"To: {recipient}\nSubject: {subject}\n\n{body}")  # Save sent email to history
+        save_email_to_history(f"To: {recipient}\nSubject: {subject}\n\n{body}")
         return True
     except Exception as e:
         logger.error(f"Failed to send email: {str(e)}")
         return False
+
+# IMAP Email Receiving
+def check_new_emails():
+    try:
+        mail = imaplib2.IMAP4_SSL(IMAP_SERVER)
+        mail.login(EMAIL_SENDER, EMAIL_PASSWORD)
+        mail.select("inbox")
+        status, messages = mail.search(None, "UNSEEN")
+        mail_ids = messages[0].split()
+
+        new_emails = []
+        for mail_id in mail_ids[-5:]:  # Last 5 unread emails
+            status, msg_data = mail.fetch(mail_id, "(RFC822)")
+            raw_email = msg_data[0][1]
+            msg = email.message_from_bytes(raw_email)
+            subject, encoding = decode_header(msg["Subject"])[0]
+            if isinstance(subject, bytes):
+                subject = subject.decode(encoding or "utf-8", errors="ignore")
+            from_ = msg.get("From")
+            body = ""
+            if msg.is_multipart():
+                for part in msg.walk():
+                    if part.get_content_type() == "text/plain":
+                        body = part.get_payload(decode=True).decode("utf-8", errors="ignore")
+                        break
+            else:
+                body = msg.get_payload(decode=True).decode("utf-8", errors="ignore")
+            new_emails.append({"id": mail_id.decode(), "subject": subject, "from": from_, "body": body[:200]})  # Truncate body
+        mail.logout()
+        return new_emails
+    except Exception as e:
+        logger.error(f"IMAP error: {str(e)}")
+        return []
+
+# Real-time IMAP listener with IDLE
+def listen_for_emails():
+    def callback(*args):
+        emails = check_new_emails()
+        if emails:
+            socketio.emit("new_emails", {"emails": emails}, namespace="/email")
+
+    while True:
+        try:
+            mail = imaplib2.IMAP4_SSL(IMAP_SERVER)
+            mail.login(EMAIL_SENDER, EMAIL_PASSWORD)
+            mail.select("inbox")
+            mail.idle()
+            mail.idle_callback(callback)
+            time.sleep(30)  # Fallback polling
+            mail.idle_done()
+            mail.logout()
+        except Exception as e:
+            logger.error(f"IMAP IDLE error: {str(e)}")
+            time.sleep(10)  # Retry after delay
 
 # Routes
 @app.route("/", methods=["GET", "POST"])
@@ -333,10 +394,6 @@ def home():
 
 @app.route("/suggest", methods=["POST"])
 def suggest():
-    """
-    Generate an email suggestion based on input text when explicitly requested.
-    Optimized to reduce API calls using caching and local fallbacks.
-    """
     try:
         data = request.get_json()
         text = data.get("text", "").strip()
@@ -431,9 +488,6 @@ def suggest():
 
 @app.route("/send_email", methods=["POST"])
 def send_email_route():
-    """
-    Send an email using SMTP and save it to history.
-    """
     try:
         data = request.get_json()
         recipient = data.get("recipient", "").strip()
@@ -452,5 +506,17 @@ def send_email_route():
         logger.error(f"Send email error: {str(e)}")
         return jsonify({"status": "error", "message": "Server error"}), 500
 
+@app.route("/check_emails", methods=["GET"])
+def check_emails_route():
+    try:
+        emails = check_new_emails()
+        return jsonify({"status": "success", "emails": emails}), 200
+    except Exception as e:
+        logger.error(f"Check emails error: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+# Start IMAP listener in a background thread
+threading.Thread(target=listen_for_emails, daemon=True).start()
+
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    socketio.run(app, debug=True, host="0.0.0.0", port=5000)

@@ -683,4 +683,63 @@ pre[contenteditable="true"] {
     .email-subject {
         max-width: 100%;
     }
+    /* Add to the end of your existing style.css */
+
+     /* Inbox Section */
+    .inbox-section {
+    background-color: #fff;
+    margin-top: 20px;
+    padding: 20px;
+    border-radius: 6px;
+    border: 1px solid #dadce0;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+}
+
+.inbox-section h2 {
+    font-size: 18px;
+    color: #1a73e8;
+    margin-bottom: 15px;
+}
+
+#email-list {
+    list-style: none;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+#email-list li {
+    padding: 10px;
+    border-bottom: 1px solid #eee;
+    transition: background-color 0.2s ease;
+}
+
+#email-list li:hover {
+    background-color: #f8f9fa;
+}
+
+#email-list li strong {
+    color: #202124;
+}
+
+[data-theme="dark"] .inbox-section {
+    background-color: #303134;
+    border-color: #5f6368;
+}
+
+[data-theme="dark"] #email-list li {
+    border-bottom: 1px solid #5f6368;
+    color: #e8eaed;
+}
+
+[data-theme="dark"] #email-list li:hover {
+    background-color: #3c4043;
+}
+
+[data-theme="dark"] #email-list li strong {
+    color: #e8eaed;
+}
+
+[data-theme="dark"] .inbox-section h2 {
+    color: #8ab4f8;
+}
 }

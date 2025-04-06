@@ -37,7 +37,6 @@ function getSuggestion() {
     const suggestBtn = document.getElementById("suggest-btn");
     const currentTime = Date.now();
 
-    // Check cooldown
     if (currentTime - lastSuggestionTime < SUGGESTION_COOLDOWN) {
         suggestionDiv.innerHTML = `<span class="error">Please wait ${Math.ceil((SUGGESTION_COOLDOWN - (currentTime - lastSuggestionTime)) / 1000)} seconds before requesting again</span>`;
         return;
@@ -60,7 +59,6 @@ function getSuggestion() {
 
         if (data.status === "success") {
             suggestionDiv.innerHTML = `<strong>Suggestion (${data.source}):</strong> ${data.suggestion}`;
-            // Auto-fill email fields if suggestion includes To: or Subject:
             const lines = data.suggestion.split("\n");
             for (const line of lines) {
                 if (line.startsWith("To:")) {
@@ -92,19 +90,16 @@ function sendEmail() {
     const statusDiv = document.getElementById("email-status");
     const currentTime = Date.now();
 
-    // Check cooldown
     if (currentTime - lastSendTime < SEND_COOLDOWN) {
         statusDiv.textContent = `Please wait ${Math.ceil((SEND_COOLDOWN - (currentTime - lastSendTime)) / 1000)} seconds before sending again`;
         statusDiv.className = "status-message error";
         return;
     }
 
-    // Parse output for recipient and subject if present
     let recipient = recipientInput.value.trim();
     let subject = subjectInput.value.trim();
     let body = output;
 
-    // Extract from output if fields are empty
     if (!recipient || !subject) {
         const lines = output.split("\n");
         for (const line of lines) {
@@ -138,7 +133,7 @@ function sendEmail() {
         statusDiv.textContent = data.message;
         statusDiv.className = `status-message ${data.status === "success" ? "success" : "error"}`;
         if (data.status === "success") {
-            setTimeout(() => { statusDiv.textContent = ""; }, 5000); // Clear success message after 5s
+            setTimeout(() => { statusDiv.textContent = ""; }, 5000);
         }
     })
     .catch(error => {
@@ -172,15 +167,28 @@ function filterHistory() {
     });
 }
 
+// Real-time email display (only in second version, integrated here)
+function updateEmailList(emails) {
+    const emailList = document.getElementById("email-list");
+    emailList.innerHTML = "";
+    emails.forEach(email => {
+        const li = document.createElement("li");
+        li.innerHTML = `<strong>${email.subject}</strong> from ${email.from}<br>${email.body}`;
+        emailList.appendChild(li);
+    });
+}
+
 // Initialize all event listeners
 document.addEventListener("DOMContentLoaded", () => {
     initializeThemeToggle();
     initializeCopyButton();
 
+    // Event listeners for buttons and inputs
     document.getElementById("suggest-btn").addEventListener("click", getSuggestion);
     document.getElementById("send-email-btn").addEventListener("click", sendEmail);
     document.getElementById("search-input").addEventListener("keyup", filterHistory);
 
+    // Radio button listeners for refine options
     document.querySelectorAll('input[name="action"]').forEach(radio => {
         radio.addEventListener("change", (e) => {
             toggleRefineOptions(e.target.value === "refine");
@@ -192,4 +200,28 @@ document.addEventListener("DOMContentLoaded", () => {
     if (selectedAction) {
         toggleRefineOptions(selectedAction.value === "refine");
     }
+
+    // Socket.IO for real-time emails (only in second version, integrated here)
+    const socket = io.connect("http://localhost:5000", { path: "/socket.io", transports: ["websocket"] });
+    socket.on("connect", () => {
+        console.log("Connected to WebSocket server");
+    });
+
+    socket.on("new_emails", (data) => {
+        updateEmailList(data.emails);
+    });
+
+    // Polling fallback for initial load and backup
+    function fetchEmails() {
+        fetch("/check_emails")
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === "success") {
+                    updateEmailList(data.emails);
+                }
+            })
+            .catch(error => console.error("Error fetching emails:", error));
+    }
+    fetchEmails();
+    setInterval(fetchEmails, 30000); // Poll every 30 seconds
 });
