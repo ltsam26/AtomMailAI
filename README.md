@@ -78,9 +78,7 @@ See CONTRIBUTING.md for details.
 License
 This project is licensed under the MIT License. See the LICENSE file for details.
 
-Contact
-GitHub Issues: Report bugs or suggest features here.
-Email: Reach out via [your-email@example.com (mailto:your-email@example.com)] (replace with your contact).
+
 
 Acknowledgments
 Powered by Google Gemini and Gmail API.
