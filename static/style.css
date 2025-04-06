@@ -742,4 +742,54 @@ pre[contenteditable="true"] {
 [data-theme="dark"] .inbox-section h2 {
     color: #8ab4f8;
 }
+/* Add to existing style.css */
+
+/* Inbox Section */
+.inbox-section {
+    background-color: #fff;
+    margin-top: 20px;
+    padding: 20px;
+    border-radius: 6px;
+    border: 1px solid #dadce0;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+}
+
+.inbox-section h2 {
+    font-size: 18px;
+    color: #1a73e8;
+    margin-bottom: 15px;
+}
+
+#email-list {
+    list-style: none;
+}
+
+#email-list li {
+    padding: 10px;
+    border-bottom: 1px solid #eee;
+    font-size: 14px;
+    color: #202124;
+}
+
+#email-list li:last-child {
+    border-bottom: none;
+}
+
+#email-list li strong {
+    font-weight: 500;
+}
+
+/* Dark Theme */
+[data-theme="dark"] .inbox-section {
+    background-color: #303134;
+    border-color: #5f6368;
+}
+
+[data-theme="dark"] #email-list li {
+    color: #e8eaed;
+}
+
+[data-theme="dark"] .inbox-section h2 {
+    color: #8ab4f8;
+}
 }

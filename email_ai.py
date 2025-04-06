@@ -3,36 +3,53 @@ import re
 import json
 import time
 import logging
-import threading
-import smtplib
-import imaplib2
-import email
-from email.mime.text import MIMEText
-from email.header import decode_header
 import numpy as np
 from datetime import datetime
-from flask import Flask, request, render_template, jsonify
+from flask import Flask, request, render_template, jsonify, redirect, url_for
 from flask_socketio import SocketIO, emit
 import google.generativeai as genai
 from cryptography.fernet import Fernet
 import language_tool_python
 from sentence_transformers import SentenceTransformer
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+import base64
+from email.mime.text import MIMEText
 
 # Initialize Flask app and SocketIO
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Gemini API setup
-GOOGLE_API_KEY = "AIzaSyBC7YMzKKrsfpt42PM9ObZtK7R6-QUHrXo"  # Replace with your API key
+GOOGLE_API_KEY = "AIzaSyBC7YMzKKrsfpt42PM9ObZtK7R6-QUHrXo"  # Replace with your Gemini API key
 genai.configure(api_key=GOOGLE_API_KEY)
 model = genai.GenerativeModel('gemini-1.5-flash')
 
-# Email configuration
-EMAIL_SENDER = "your-email@gmail.com"  # Replace with your email
-EMAIL_PASSWORD = "your-app-password"  # Replace with your App Password
-SMTP_SERVER = "smtp.gmail.com"
-SMTP_PORT = 587
-IMAP_SERVER = "imap.gmail.com"
+# Gmail API setup
+SCOPES = ['https://www.googleapis.com/auth/gmail.modify']  # Allows read/write access
+CREDENTIALS_FILE = "credentials.json"
+TOKEN_FILE = "token.json"
+
+def get_gmail_service():
+    creds = None
+    if os.path.exists(TOKEN_FILE):
+        creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
+            creds = flow.run_local_server(
+                port=5000,  # Match Flask port
+                redirect_uri="http://localhost:5000/oauth2callback",  # Explicit redirect URI
+                prompt="consent"  # Force consent screen for testing
+            )
+        with open(TOKEN_FILE, 'w') as token:
+            token.write(creds.to_json())
+    return build('gmail', 'v1', credentials=creds)
 
 # Encryption setup
 key = b'w6-1ePqZNLFMxJk6EWZeDnyXSeh8Kunwmu-N6QREkWg='
@@ -175,7 +192,43 @@ def extract_subject(prompt):
     match = re.search(r"subject:\s*(.+)", prompt, re.IGNORECASE)
     return match.group(1).strip() if match else None
 
-# Email generation and processing
+# Gmail API email functions
+def send_email(recipient, subject, body):
+    try:
+        service = get_gmail_service()
+        message = MIMEText(body)
+        message['to'] = recipient
+        message['subject'] = subject
+        raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+        body = {'raw': raw}
+        service.users().messages().send(userId="me", body=body).execute()
+        logger.info(f"Email sent to {recipient}")
+        save_email_to_history(f"To: {recipient}\nSubject: {subject}\n\n{body}")
+        return True
+    except HttpError as e:
+        logger.error(f"Gmail API error: {str(e)}")
+        return False
+
+def check_new_emails():
+    try:
+        service = get_gmail_service()
+        results = service.users().messages().list(userId="me", labelIds=["INBOX"], q="is:unread").execute()
+        messages = results.get("messages", [])
+        emails = []
+        for msg in messages[:5]:  # Limit to last 5 unread emails
+            msg_data = service.users().messages().get(userId="me", id=msg["id"]).execute()
+            headers = msg_data["payload"]["headers"]
+            subject = next(h["value"] for h in headers if h["name"] == "Subject")
+            from_ = next(h["value"] for h in headers if h["name"] == "From")
+            snippet = msg_data.get("snippet", "")
+            emails.append({"id": msg["id"], "subject": subject, "from": from_, "snippet": snippet})
+        socketio.emit("new_emails", {"emails": emails}, namespace="/email")
+        return emails
+    except HttpError as e:
+        logger.error(f"Gmail API error: {str(e)}")
+        return []
+
+# Email generation and processing functions
 def generate_email(prompt, tone=None, recipient=None, template=None):
     history = load_email_history(cipher)
     prefs = load_user_prefs()
@@ -273,79 +326,6 @@ def refine_text(text, action):
     except Exception as e:
         logger.error(f"Gemini API error: {e}")
         return f"Error: {str(e)}"
-
-# SMTP Email Sending
-def send_email(recipient, subject, body):
-    try:
-        msg = MIMEText(body)
-        msg["Subject"] = subject
-        msg["From"] = EMAIL_SENDER
-        msg["To"] = recipient
-
-        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-            server.starttls()
-            server.login(EMAIL_SENDER, EMAIL_PASSWORD)
-            server.send_message(msg)
-            logger.info(f"Email sent to {recipient}")
-        save_email_to_history(f"To: {recipient}\nSubject: {subject}\n\n{body}")
-        return True
-    except Exception as e:
-        logger.error(f"Failed to send email: {str(e)}")
-        return False
-
-# IMAP Email Receiving
-def check_new_emails():
-    try:
-        mail = imaplib2.IMAP4_SSL(IMAP_SERVER)
-        mail.login(EMAIL_SENDER, EMAIL_PASSWORD)
-        mail.select("inbox")
-        status, messages = mail.search(None, "UNSEEN")
-        mail_ids = messages[0].split()
-
-        new_emails = []
-        for mail_id in mail_ids[-5:]:  # Last 5 unread emails
-            status, msg_data = mail.fetch(mail_id, "(RFC822)")
-            raw_email = msg_data[0][1]
-            msg = email.message_from_bytes(raw_email)
-            subject, encoding = decode_header(msg["Subject"])[0]
-            if isinstance(subject, bytes):
-                subject = subject.decode(encoding or "utf-8", errors="ignore")
-            from_ = msg.get("From")
-            body = ""
-            if msg.is_multipart():
-                for part in msg.walk():
-                    if part.get_content_type() == "text/plain":
-                        body = part.get_payload(decode=True).decode("utf-8", errors="ignore")
-                        break
-            else:
-                body = msg.get_payload(decode=True).decode("utf-8", errors="ignore")
-            new_emails.append({"id": mail_id.decode(), "subject": subject, "from": from_, "body": body[:200]})  # Truncate body
-        mail.logout()
-        return new_emails
-    except Exception as e:
-        logger.error(f"IMAP error: {str(e)}")
-        return []
-
-# Real-time IMAP listener with IDLE
-def listen_for_emails():
-    def callback(*args):
-        emails = check_new_emails()
-        if emails:
-            socketio.emit("new_emails", {"emails": emails}, namespace="/email")
-
-    while True:
-        try:
-            mail = imaplib2.IMAP4_SSL(IMAP_SERVER)
-            mail.login(EMAIL_SENDER, EMAIL_PASSWORD)
-            mail.select("inbox")
-            mail.idle()
-            mail.idle_callback(callback)
-            time.sleep(30)  # Fallback polling
-            mail.idle_done()
-            mail.logout()
-        except Exception as e:
-            logger.error(f"IMAP IDLE error: {str(e)}")
-            time.sleep(10)  # Retry after delay
 
 # Routes
 @app.route("/", methods=["GET", "POST"])
@@ -515,8 +495,19 @@ def check_emails_route():
         logger.error(f"Check emails error: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# Start IMAP listener in a background thread
-threading.Thread(target=listen_for_emails, daemon=True).start()
+# OAuth callback route
+@app.route("/oauth2callback")
+def oauth2callback():
+    return "Authorization complete. You can close this window."
+
+# Background task to poll emails
+def poll_emails():
+    while True:
+        check_new_emails()
+        time.sleep(60)  # Poll every 60 seconds
+
+import threading
+threading.Thread(target=poll_emails, daemon=True).start()
 
 if __name__ == "__main__":
     socketio.run(app, debug=True, host="0.0.0.0", port=5000)

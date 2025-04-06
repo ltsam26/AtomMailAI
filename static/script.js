@@ -28,7 +28,7 @@ function toggleRefineOptions(show) {
 
 // Suggestion functionality with throttling
 let lastSuggestionTime = 0;
-const SUGGESTION_COOLDOWN = 2000; // 2 seconds in milliseconds
+const SUGGESTION_COOLDOWN = 2000; // 2 seconds
 
 function getSuggestion() {
     const text = document.getElementById("input-text").value;
@@ -38,7 +38,7 @@ function getSuggestion() {
     const currentTime = Date.now();
 
     if (currentTime - lastSuggestionTime < SUGGESTION_COOLDOWN) {
-        suggestionDiv.innerHTML = `<span class="error">Please wait ${Math.ceil((SUGGESTION_COOLDOWN - (currentTime - lastSuggestionTime)) / 1000)} seconds before requesting again</span>`;
+        suggestionDiv.innerHTML = `<span class="error">Please wait ${Math.ceil((SUGGESTION_COOLDOWN - (currentTime - lastSuggestionTime)) / 1000)} seconds</span>`;
         return;
     }
 
@@ -80,7 +80,7 @@ function getSuggestion() {
 
 // Send Email functionality with throttling
 let lastSendTime = 0;
-const SEND_COOLDOWN = 3000; // 3 seconds in milliseconds
+const SEND_COOLDOWN = 3000; // 3 seconds
 
 function sendEmail() {
     const output = document.getElementById("output").textContent.trim();
@@ -91,7 +91,7 @@ function sendEmail() {
     const currentTime = Date.now();
 
     if (currentTime - lastSendTime < SEND_COOLDOWN) {
-        statusDiv.textContent = `Please wait ${Math.ceil((SEND_COOLDOWN - (currentTime - lastSendTime)) / 1000)} seconds before sending again`;
+        statusDiv.textContent = `Please wait ${Math.ceil((SEND_COOLDOWN - (currentTime - lastSendTime)) / 1000)} seconds`;
         statusDiv.className = "status-message error";
         return;
     }
@@ -167,13 +167,13 @@ function filterHistory() {
     });
 }
 
-// Real-time email display (only in second version, integrated here)
-function updateEmailList(emails) {
+// Display emails in inbox (combined displayEmails and updateEmailList)
+function displayEmails(emails) {
     const emailList = document.getElementById("email-list");
     emailList.innerHTML = "";
     emails.forEach(email => {
         const li = document.createElement("li");
-        li.innerHTML = `<strong>${email.subject}</strong> from ${email.from}<br>${email.body}`;
+        li.innerHTML = `<strong>${email.subject}</strong> from ${email.from}<br>${email.snippet || email.body || "No preview available"}`;
         emailList.appendChild(li);
     });
 }
@@ -201,27 +201,26 @@ document.addEventListener("DOMContentLoaded", () => {
         toggleRefineOptions(selectedAction.value === "refine");
     }
 
-    // Socket.IO for real-time emails (only in second version, integrated here)
+    // Socket.IO for real-time email updates
     const socket = io.connect("http://localhost:5000", { path: "/socket.io", transports: ["websocket"] });
     socket.on("connect", () => {
         console.log("Connected to WebSocket server");
     });
-
     socket.on("new_emails", (data) => {
-        updateEmailList(data.emails);
+        displayEmails(data.emails);
     });
 
-    // Polling fallback for initial load and backup
+    // Initial email fetch with polling fallback
     function fetchEmails() {
         fetch("/check_emails")
             .then(response => response.json())
             .then(data => {
                 if (data.status === "success") {
-                    updateEmailList(data.emails);
+                    displayEmails(data.emails);
                 }
             })
             .catch(error => console.error("Error fetching emails:", error));
     }
-    fetchEmails();
-    setInterval(fetchEmails, 30000); // Poll every 30 seconds
+    fetchEmails(); // Initial fetch
+    setInterval(fetchEmails, 30000); // Poll every 30 seconds as fallback
 });
